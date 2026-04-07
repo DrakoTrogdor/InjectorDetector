@@ -25,6 +25,17 @@ fn classify_invisible(c: char) -> Option<&'static str> {
     }
 }
 
+/// U+FEFF at byte offset 0 of a file is the UTF-8 byte-order mark —
+/// a standard text-encoding marker written by many Windows tools
+/// (notably MSBuild, Visual Studio, and the .NET SDK for generated
+/// `.g.props` / `.g.targets` files). It is **not** a smuggling attempt
+/// when it appears as the very first character; only mid-file BOMs are
+/// suspicious. This helper lets the main loop ignore a leading BOM
+/// without relaxing the rule for zero-width characters elsewhere.
+fn is_leading_bom(c: char, absolute_offset: usize) -> bool {
+    c == '\u{FEFF}' && absolute_offset == 0
+}
+
 /// Returns the script kind ("cyrillic" / "greek") if `c` is a non-Latin
 /// character that is **visually confusable with a specific Latin letter**.
 /// Pure foreign letters (Δ, Σ, π, ф, ш, Ж, …) return `None` — they are
@@ -124,8 +135,11 @@ impl Detector for HiddenCharsDetector {
 
         // 1. Invisible characters
         for (i, c) in chunk.text.char_indices() {
+            let abs = chunk.span.start + i;
+            if is_leading_bom(c, abs) {
+                continue;
+            }
             if let Some(kind) = classify_invisible(c) {
-                let abs = chunk.span.start + i;
                 let len = c.len_utf8();
                 let severity = match kind {
                     "bidi-override" | "tag-character" => Severity::Critical,
@@ -242,6 +256,29 @@ mod tests {
     #[test]
     fn flags_zero_width_space() {
         let f = HiddenCharsDetector.analyze(&chunk("a\u{200B}b"));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].severity, Severity::Medium);
+    }
+
+    #[test]
+    fn leading_bom_is_not_flagged() {
+        // U+FEFF at byte 0 of the file (MSBuild `.g.props` / `.g.targets`,
+        // Visual Studio auto-generated files, PowerShell scripts from
+        // certain tools — all legitimately start with a UTF-8 BOM).
+        let f = HiddenCharsDetector.analyze(&chunk(
+            "\u{FEFF}<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        ));
+        assert!(
+            f.is_empty(),
+            "leading UTF-8 BOM must not be flagged, got {f:?}"
+        );
+    }
+
+    #[test]
+    fn bom_in_middle_of_file_is_still_flagged() {
+        // A BOM after non-zero content is suspicious — real
+        // zero-width smuggling.
+        let f = HiddenCharsDetector.analyze(&chunk("hello \u{FEFF} world"));
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].severity, Severity::Medium);
     }

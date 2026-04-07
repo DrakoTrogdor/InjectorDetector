@@ -25,10 +25,56 @@ pub struct WalkEntry {
     pub bytes: Vec<u8>,
 }
 
+/// Built-in exclusion globs for directories that almost always contain
+/// machine-generated content and should never be scanned by default.
+///
+/// Scoped deliberately to **unambiguous** build / cache / dependency
+/// directories. Generic names like `bin/`, `build/`, `dist/`, `out/`
+/// are *not* included because legitimate projects put real source or
+/// docs in those.
+const DEFAULT_EXCLUDE_GLOBS: &[&str] = &[
+    // Rust / Maven
+    "**/target/**",
+    // .NET / MSBuild
+    "**/obj/**",
+    // Node / web
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.parcel-cache/**",
+    "**/.turbo/**",
+    // Python
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/.tox/**",
+    "**/.pytest_cache/**",
+    "**/.mypy_cache/**",
+    "**/.ruff_cache/**",
+    "**/*.egg-info/**",
+    // JVM
+    "**/.gradle/**",
+    // Infra
+    "**/.terraform/**",
+    "**/.serverless/**",
+    // Ruby / CocoaPods
+    "**/.bundle/**",
+    "**/Pods/**",
+    // VCS internals that the ignore crate usually handles but we
+    // want to be sure about for the gix-tree walker path.
+    "**/.git/**",
+];
+
 /// Walk a loaded repo and yield in-scope files.
 pub fn walk(repo: &LoadedRepo, config: &ScanConfig) -> Result<Box<dyn Iterator<Item = Result<WalkEntry>>>> {
     let include = build_globset(&config.include).context("invalid --include glob")?;
-    let exclude = build_globset(&config.exclude).context("invalid --exclude glob")?;
+    // User excludes are merged with the built-in default exclude list
+    // unless the user explicitly turned it off.
+    let mut exclude_patterns = config.exclude.clone();
+    if config.use_default_excludes {
+        exclude_patterns.extend(DEFAULT_EXCLUDE_GLOBS.iter().map(|s| (*s).to_string()));
+    }
+    let exclude = build_globset(&exclude_patterns).context("invalid --exclude glob")?;
     let max_bytes = config.max_binary_bytes;
 
     // Compute the incremental filter if --since is set.

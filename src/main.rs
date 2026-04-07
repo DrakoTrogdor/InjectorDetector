@@ -94,6 +94,12 @@ struct Cli {
     #[arg(short, long)]
     quiet: bool,
 
+    /// Disable the built-in exclude list for build/generated
+    /// directories (target, obj, node_modules, __pycache__, .venv,
+    /// etc.). Use this if you genuinely need to scan those paths.
+    #[arg(long)]
+    no_default_excludes: bool,
+
     /// Worker thread count.
     #[arg(long)]
     jobs: Option<usize>,
@@ -130,6 +136,7 @@ fn run() -> Result<ExitCode> {
     config.quarantine = cli.quarantine;
     config.ignore_file = cli.ignore_file;
     config.quiet = cli.quiet;
+    config.use_default_excludes = !cli.no_default_excludes;
     if let Some(j) = cli.jobs {
         config.jobs = j;
     }

@@ -30,6 +30,10 @@ pub struct ScanConfig {
     /// Suppress command-line progress output (and any non-error stderr
     /// chatter).
     pub quiet: bool,
+    /// Apply the built-in exclude list for well-known build / generated
+    /// directories (target, obj, node_modules, __pycache__, .venv, …).
+    /// Defaults to `true`.
+    pub use_default_excludes: bool,
     pub max_binary_bytes: u64,
     pub max_chunk_bytes: usize,
     pub chunk_overlap_bytes: usize,
@@ -101,6 +105,7 @@ impl Default for ScanConfig {
             ignore_file: PathBuf::from(".injector-detector-ignore"),
             quarantine: false,
             quiet: false,
+            use_default_excludes: true,
             max_binary_bytes: 1024 * 1024,
             max_chunk_bytes: 2048,
             chunk_overlap_bytes: 256,
