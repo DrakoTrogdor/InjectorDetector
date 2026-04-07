@@ -12,6 +12,7 @@ pub mod progress;
 pub mod quarantine;
 pub mod report;
 pub mod repo;
+pub mod safe_view;
 pub mod types;
 pub mod walk;
 

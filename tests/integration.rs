@@ -8,9 +8,10 @@ use common::git_helper;
 
 use injector_detector::{
     config::ScanConfig,
-    is_unsafe, scan,
+    is_unsafe,
+    report::{RenderOptions, ScanReport, Verdict},
+    scan,
     types::Severity,
-    report::{ScanReport, Verdict},
 };
 
 fn fixture(name: &str) -> String {
@@ -267,8 +268,9 @@ fn gix_tree_walker_skips_working_tree_only_files() {
 #[test]
 fn json_and_sarif_render_without_error() {
     let report = run("dirty");
-    let json = report.render_json().expect("json render");
+    let opts = RenderOptions::default();
+    let json = report.render_json(&opts).expect("json render");
     assert!(json.contains("\"verdict\""));
-    let sarif = report.render_sarif().expect("sarif render");
+    let sarif = report.render_sarif(&opts).expect("sarif render");
     assert!(sarif.contains("\"version\": \"2.1.0\""));
 }

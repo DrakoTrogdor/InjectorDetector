@@ -16,7 +16,8 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] Initial commit
 
 ### CLI
-- [x] `clap`-based CLI with positional `REPO`, `--rev`, `--config`, `--format`, `--fail-on`, `--include`, `--exclude`, `--no-clone`, `--keep`, `--since`, `--quarantine`, `--ignore-file`, `-q` / `--quiet`, **`--no-default-excludes`**, `--jobs`
+- [x] `clap`-based CLI with positional `REPO`, `--rev`, `--config`, `--format`, `--fail-on`, `--include`, `--exclude`, `--no-clone`, `--keep`, `--since`, `--quarantine`, `--ignore-file`, `-q` / `--quiet`, `--no-default-excludes`, **`--ai-safe`**, `--jobs`
+- [x] **Rich `--help`** with multi-paragraph description and a worked-examples block covering local/remote scans, severity gating, JSON/SARIF, incremental mode, glob filters, the quarantine workflow, default-excludes, and a dedicated **"FOR AI AGENTS"** section explaining `--ai-safe` and the [UNTRUSTED:…] sentinel convention.
 - [x] Exit codes: `0` SAFE, `1` NOT SAFE, `2` scan error
 - [x] `tracing` / `tracing-subscriber` initialised with `RUST_LOG` env filter
 - [x] Walker emits `tracing::warn!` when `--rev` is silently dropped during the working-tree fallback
@@ -82,6 +83,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `json` — `serde_json` pretty
 - [x] `sarif` — real SARIF 2.1.0 with rules, results, byte-offset regions, severity-mapped levels
 - [x] `Category` exposed via SARIF `properties.category` and JSON `category` field on each finding
+- [x] **`--ai-safe` rendering mode** — `RenderOptions { ai_safe }` plumbed through all three reporters. When set: prints a preamble explaining the [UNTRUSTED:…] sentinel convention, wraps every evidence snippet in `[UNTRUSTED:…]`, breaks dangerous token pairs (`<|`, `|>`, ` ``` `, `{{`, `}}`) with a backslash-space separator, and renders invisible / bidi / tag characters as `<U+XXXX>` codepoint notation. JSON output gains `safe_view: true` and `ai_safe_preamble` top-level fields; SARIF gains the same under `runs[].tool.driver.properties`. See `src/safe_view.rs`.
 
 ### Configuration (`src/config.rs`)
 - [x] `ScanConfig` defaults
@@ -97,10 +99,10 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **Auto-quarantine review queue** — TOML-backed `.injector-detector-ignore` file. `--quarantine` appends current findings to the ignore file and clears the report so the build passes (for human review). Normal scans filter out any finding whose `(detector, path, message, evidence_hash)` matches an entry. Path defaults to `.injector-detector-ignore` and can be overridden with `--ignore-file`.
 
 ### Tests
-- [x] **42 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`, `progress`
+- [x] **50 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `safe_view`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`, `progress`
 - [x] **17 integration tests** in `tests/integration.rs` driving the public `scan()` API (adds quarantine round-trip and incremental no-op)
 - [x] **4 property tests** (`proptest`) in `tests/properties.rs` for chunker boundary safety, span correctness, multibyte input, overlap invariants
-- [x] **3 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters
+- [x] **5 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters plus AI-safe variants
 - [x] **gix tree walker test** — `tests/common/git_helper.rs` builds a real git repo programmatically via `gix::init` + `write_blob` + `write_object` + `commit_as`; tests verify the gix snapshot path is taken (committed-content-only finding, working-tree-only-clean negative, and incremental HEAD→HEAD no-op)
 - [x] `tests/fixtures/clean/` — README, Rust source, JSON config (verdict: SAFE)
 - [x] `tests/fixtures/dirty/` — one fixture per detector / extractor:
@@ -108,7 +110,7 @@ Update this file alongside the change that completes (or adds) an item.
   - `notebook.ipynb`, `source.py`, `markup.html`, `workflow.yaml`
   - `high_entropy.txt`
 - [x] All feature combinations build clean: default, `--features embeddings`, `--features llm`, `--all-features`
-- [x] **Total: 66 tests passing under every feature set**
+- [x] **Total: 76 tests passing under every feature set**
 
 ## In progress
 
