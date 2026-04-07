@@ -32,11 +32,15 @@ and complements those runtime defenses rather than replacing them.
     "ignore previous instructions", role hijacks (`<|im_start|>`),
     Alpaca instruction markers, jailbreak preambles, exfiltration
     vocabulary, and tool-call spoofs.
-  - **Hidden characters** — zero-width, bidi-override, and Unicode
-    tag characters, plus Cyrillic / Greek **homoglyph clusters** that
-    are visually confusable with Latin letters. Math notation like
-    `ΔVol`, `Σ(x)`, `π*r²` is correctly *not* flagged. Leading
-    UTF-8 BOMs are recognised as legitimate text-encoding markers.
+  - **Hidden characters** — five categories of invisible smuggling:
+    zero-width (incl. Word Joiner U+2060), bidi-override (Trojan
+    Source), Unicode tag characters, **variation selectors VS1–VS16**,
+    and **Variation Selectors Supplement VS17–VS256** (the Paul Butler
+    "smuggling arbitrary data through an emoji" channel). Plus
+    Cyrillic / Greek **homoglyph clusters** that are visually
+    confusable with Latin letters. Math notation like `ΔVol`, `Σ(x)`,
+    `π*r²` is correctly *not* flagged. Leading UTF-8 BOMs are
+    recognised as legitimate text-encoding markers.
   - **Encoded payloads** — recursive base64 / hex / URL decoding
     (depth ≤ 2) with re-scanning of the decoded text against a
     focused needle list.
@@ -349,8 +353,8 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt
 ```
 
-Test inventory: 50 unit tests, 17 integration tests, 4 property tests
-(`proptest`), 5 snapshot tests (`insta`). All 76 pass under default,
+Test inventory: 54 unit tests, 17 integration tests, 4 property tests
+(`proptest`), 5 snapshot tests (`insta`). All 80 pass under default,
 `--features embeddings`, `--features llm`, and `--all-features`.
 
 The repo layout is documented in [`DESIGN.md`](DESIGN.md) §5, and the

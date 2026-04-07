@@ -282,10 +282,22 @@ technique.
 
 Targets common smuggling vectors that defeat human review.
 
-- **Invisible characters** — zero-width (U+200B, U+200C, U+200D,
-  U+FEFF), bidi-overrides (U+202A–U+202E, U+2066–U+2069), and
-  Unicode tag characters (U+E0000–U+E007F). Zero-width is Medium;
-  bidi-override and tag characters are Critical.
+- **Invisible characters** in five categories:
+  - **Zero-width** (Medium): U+200B (ZWSP), U+200C (ZWNJ),
+    U+200D (ZWJ), **U+2060 (Word Joiner)**, U+FEFF (BOM, with
+    leading-byte exception below).
+  - **Bidi-override** (Critical): U+202A–U+202E and U+2066–U+2069 —
+    the Boucher & Anderson "Trojan Source" attack (2021).
+  - **Tag characters** (Critical): U+E0000–U+E007F — a complete
+    invisible duplicate of the ASCII alphabet that an LLM tokenizer
+    reads but a human renderer drops to nothing.
+  - **Variation selectors** (Critical): U+FE00–U+FE0F (VS1–VS16).
+    On their own, or after a non-emoji base character, these encode
+    arbitrary 4-bit nibbles invisibly — the Paul Butler "Smuggling
+    arbitrary data through an emoji" channel (2025).
+  - **Variation Selectors Supplement** (Critical): U+E0100–U+E01EF
+    (VS17–VS256) — a 240-symbol invisible alphabet, large enough to
+    encode an entire hidden instruction set.
 - **Homoglyph clusters** — Latin-script words containing one or more
   Cyrillic / Greek characters that are *visually confusable* with a
   specific Latin letter. The confusable set is curated to exclude

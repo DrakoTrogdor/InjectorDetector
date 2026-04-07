@@ -57,7 +57,14 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `Detector` trait + parallel `Engine` (rayon, sized by `--jobs`)
 - [x] Per-detector enable toggles via config
 - [x] **`heuristic`** — `yara-x` 1.14 backed scanner loading bundled `rules/builtin.yar` (9 rules) plus user `extra_rules` glob patterns
-- [x] **`hidden_chars`** — zero-width (Medium), bidi-override + tag-character (Critical), plus Latin words containing Cyrillic or Greek characters that are **visually confusable** with a specific Latin letter (High). Math/science notation like `ΔVol`, `Σ(x)`, `π*r²`, `λ-calc` is deliberately not flagged — Δ, Σ, π, λ, μ, σ, θ, φ, ψ, ω are unambiguously non-Latin and their presence in a Latin word is legitimate scientific usage. A **leading UTF-8 BOM (U+FEFF at byte 0)** is also not flagged — it's a standard text-encoding marker written by many Windows tools (MSBuild `.g.props` / `.g.targets`, Visual Studio auto-generated files). BOMs mid-file are still flagged.
+- [x] **`hidden_chars`** — five categories of invisible / smuggling characters:
+  - **Zero-width** (Medium): U+200B, U+200C, U+200D, **U+2060** Word Joiner, U+FEFF (with leading-BOM exception).
+  - **Bidi-override** (Critical): U+202A–U+202E, U+2066–U+2069 (the Boucher & Anderson 2021 trojan-source attack).
+  - **Tag-character** (Critical): U+E0000–U+E007F (a complete invisible duplicate ASCII alphabet).
+  - **Variation-selector** (Critical): U+FE00–U+FE0F (VS1–VS16) — the Paul Butler "smuggling arbitrary data through an emoji" channel.
+  - **Variation-selector-supplement** (Critical): U+E0100–U+E01EF (VS17–VS256) — 240-symbol invisible alphabet.
+
+  Plus Latin words containing Cyrillic or Greek characters that are **visually confusable** with a specific Latin letter (High). Math/science notation like `ΔVol`, `Σ(x)`, `π*r²`, `λ-calc` is deliberately not flagged. A **leading UTF-8 BOM (U+FEFF at byte 0)** is also not flagged — it's a standard text-encoding marker written by many Windows tools (MSBuild `.g.props` / `.g.targets`, Visual Studio auto-generated files). BOMs mid-file are still flagged.
 - [x] **`encoded`** — base64 / hex / URL-encoded recursive decode + needle re-scan
 - [x] **`canary`** — Rebuff-style `[CANARY:<uuid>]` regex + user-supplied tokens
 - [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`. Three-gate filtering:
@@ -99,7 +106,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **Auto-quarantine review queue** — TOML-backed `.injector-detector-ignore` file. `--quarantine` appends current findings to the ignore file and clears the report so the build passes (for human review). Normal scans filter out any finding whose `(detector, path, message, evidence_hash)` matches an entry. Path defaults to `.injector-detector-ignore` and can be overridden with `--ignore-file`.
 
 ### Tests
-- [x] **50 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `safe_view`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`, `progress`
+- [x] **54 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `safe_view`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`, `progress`
 - [x] **17 integration tests** in `tests/integration.rs` driving the public `scan()` API (adds quarantine round-trip and incremental no-op)
 - [x] **4 property tests** (`proptest`) in `tests/properties.rs` for chunker boundary safety, span correctness, multibyte input, overlap invariants
 - [x] **5 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters plus AI-safe variants
@@ -110,7 +117,7 @@ Update this file alongside the change that completes (or adds) an item.
   - `notebook.ipynb`, `source.py`, `markup.html`, `workflow.yaml`
   - `high_entropy.txt`
 - [x] All feature combinations build clean: default, `--features embeddings`, `--features llm`, `--all-features`
-- [x] **Total: 76 tests passing under every feature set**
+- [x] **Total: 80 tests passing under every feature set**
 
 ## In progress
 

@@ -18,9 +18,27 @@ pub struct HiddenCharsDetector;
 
 fn classify_invisible(c: char) -> Option<&'static str> {
     match c {
-        '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' => Some("zero-width"),
+        // Zero-width and joiner-class invisibles. The Word Joiner U+2060
+        // and the BOM U+FEFF are functionally identical to the
+        // zero-width spaces for smuggling purposes.
+        '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' => Some("zero-width"),
+        // Right-to-left override and friends — the trojan-source attack
+        // surface from Boucher & Anderson 2021.
         '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' => Some("bidi-override"),
+        // Unicode tags block: a complete duplicate ASCII alphabet that
+        // an LLM tokenizer reads but a human renderer drops to nothing.
+        // Used for invisible instruction smuggling.
         '\u{E0000}'..='\u{E007F}' => Some("tag-character"),
+        // Variation selectors VS1–VS16. After a base character they
+        // request a glyph variant; on their own (or after a non-emoji
+        // base), they encode arbitrary 4-bit nibbles invisibly. Active
+        // smuggling channel — see Paul Butler, "Smuggling arbitrary
+        // data through an emoji" (2025).
+        '\u{FE00}'..='\u{FE0F}' => Some("variation-selector"),
+        // Variation Selectors Supplement VS17–VS256. Same attack as
+        // above with a 240-symbol alphabet, enough to encode an entire
+        // hidden instruction set.
+        '\u{E0100}'..='\u{E01EF}' => Some("variation-selector-supplement"),
         _ => None,
     }
 }
@@ -142,7 +160,14 @@ impl Detector for HiddenCharsDetector {
             if let Some(kind) = classify_invisible(c) {
                 let len = c.len_utf8();
                 let severity = match kind {
-                    "bidi-override" | "tag-character" => Severity::Critical,
+                    // Critical channels: each one carries enough bits to
+                    // smuggle a full instruction past human review.
+                    "bidi-override"
+                    | "tag-character"
+                    | "variation-selector"
+                    | "variation-selector-supplement" => Severity::Critical,
+                    // Zero-width / Word Joiner: usually used for splitting
+                    // tokens or hiding short markers; flagged as Medium.
                     _ => Severity::Medium,
                 };
                 out.push(Finding {
@@ -258,6 +283,52 @@ mod tests {
         let f = HiddenCharsDetector.analyze(&chunk("a\u{200B}b"));
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].severity, Severity::Medium);
+    }
+
+    #[test]
+    fn flags_word_joiner() {
+        // U+2060 — invisible Word Joiner. Equivalent to ZWSP for
+        // smuggling purposes.
+        let f = HiddenCharsDetector.analyze(&chunk("hello\u{2060}world"));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].severity, Severity::Medium);
+        assert!(f[0].message.contains("zero-width"));
+    }
+
+    #[test]
+    fn flags_variation_selector_as_critical() {
+        // U+FE0F — VS16 (the emoji-presentation variation selector). On
+        // its own this is the Paul Butler "smuggling data through an
+        // emoji" channel.
+        let f = HiddenCharsDetector.analyze(&chunk("data\u{FE0F}here"));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].severity, Severity::Critical);
+        assert!(f[0].message.contains("variation-selector"));
+    }
+
+    #[test]
+    fn flags_variation_selector_supplement_as_critical() {
+        // U+E0100 — VS17 from the Variation Selectors Supplement block,
+        // which has 240 codepoints and can encode a full hidden
+        // instruction set.
+        let f = HiddenCharsDetector.analyze(&chunk("data\u{E0100}here"));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].severity, Severity::Critical);
+        assert!(f[0].message.contains("variation-selector-supplement"));
+    }
+
+    #[test]
+    fn flags_long_variation_selector_run() {
+        // A realistic Paul Butler attack: an emoji followed by a long
+        // run of variation selectors encoding a hidden message. We
+        // should report every codepoint in the run.
+        let mut s = String::from("\u{1F600}"); // grinning face
+        for cp in 0xE0100u32..=0xE0110u32 {
+            s.push(char::from_u32(cp).unwrap());
+        }
+        let f = HiddenCharsDetector.analyze(&chunk(&s));
+        assert_eq!(f.len(), 17);
+        assert!(f.iter().all(|x| x.severity == Severity::Critical));
     }
 
     #[test]
