@@ -8,6 +8,7 @@ pub mod chunk;
 pub mod config;
 pub mod detect;
 pub mod extract;
+pub mod quarantine;
 pub mod report;
 pub mod repo;
 pub mod types;
@@ -27,8 +28,15 @@ pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
     let loaded = repo::load(source, config)?;
     let engine = Engine::from_config(&config.detectors);
 
-    // Collect entries up front so we can fan them out across rayon. The
-    // walker itself is single-threaded; per-file work parallelises well.
+    // Load the quarantine file up front so we can filter / append to it.
+    let ignore_path = if config.ignore_file.is_absolute() {
+        config.ignore_file.clone()
+    } else {
+        loaded.root().join(&config.ignore_file)
+    };
+    let mut quarantine_file = quarantine::load(&ignore_path).unwrap_or_default();
+
+    // Collect entries up front so we can fan them out across rayon.
     let entries: Vec<_> = walk::walk(&loaded, config)?.collect::<Result<Vec<_>>>()?;
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -36,7 +44,7 @@ pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
         .build()
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let findings: Vec<_> = pool.install(|| {
+    let mut findings: Vec<_> = pool.install(|| {
         entries
             .par_iter()
             .flat_map_iter(|entry| {
@@ -48,6 +56,22 @@ pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
             })
             .collect()
     });
+
+    if config.quarantine {
+        // In quarantine mode, append every new finding to the ignore file
+        // and then drop them so the report comes back SAFE. The user is
+        // expected to `git add` the ignore file and review it.
+        quarantine::append_findings(&mut quarantine_file, &findings);
+        quarantine::save(&ignore_path, &quarantine_file)?;
+        tracing::info!(
+            path = %ignore_path.display(),
+            count = findings.len(),
+            "quarantined findings"
+        );
+        findings.clear();
+    } else {
+        quarantine::filter_findings(&mut findings, &quarantine_file);
+    }
 
     let mut aggregator = Aggregator::new();
     for f in findings {

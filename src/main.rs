@@ -75,6 +75,21 @@ struct Cli {
     #[arg(long)]
     keep: bool,
 
+    /// Incremental scan: only evaluate files changed between this base
+    /// revision and --rev.
+    #[arg(long)]
+    since: Option<String>,
+
+    /// Append new findings to the ignore file instead of failing the
+    /// build. Intended for review workflows; the file should be committed
+    /// and inspected by a human before future scans pass.
+    #[arg(long)]
+    quarantine: bool,
+
+    /// Path to the ignore file read by both normal and quarantine scans.
+    #[arg(long, default_value = ".injector-detector-ignore")]
+    ignore_file: std::path::PathBuf,
+
     /// Worker thread count.
     #[arg(long)]
     jobs: Option<usize>,
@@ -107,6 +122,9 @@ fn run() -> Result<ExitCode> {
     config.exclude = cli.exclude;
     config.no_clone = cli.no_clone;
     config.keep = cli.keep;
+    config.since = cli.since;
+    config.quarantine = cli.quarantine;
+    config.ignore_file = cli.ignore_file;
     if let Some(j) = cli.jobs {
         config.jobs = j;
     }

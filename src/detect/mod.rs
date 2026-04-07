@@ -6,6 +6,10 @@ mod embedding;
 mod encoded;
 mod heuristic;
 mod hidden_chars;
+#[cfg(feature = "llm")]
+mod llm_classifier;
+#[cfg(feature = "embeddings")]
+mod model_cache;
 mod perplexity;
 
 use crate::config::DetectorConfig;
@@ -70,9 +74,11 @@ impl Engine {
             detectors.push(Box::new(perplexity::PerplexityDetector));
         }
         if cfg.embedding {
-            detectors.push(Box::new(embedding::EmbeddingDetector::new(
-                cfg.embedding_model.as_ref(),
-            )));
+            detectors.push(Box::new(embedding::EmbeddingDetector::new(cfg)));
+        }
+        #[cfg(feature = "llm")]
+        if cfg.llm_classifier {
+            detectors.push(Box::new(llm_classifier::LlmClassifierDetector::new(cfg)));
         }
         Self { detectors }
     }

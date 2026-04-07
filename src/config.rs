@@ -18,6 +18,15 @@ pub struct ScanConfig {
     pub no_clone: bool,
     pub keep: bool,
     pub jobs: usize,
+    /// Optional base revision for incremental scans. When set, only
+    /// files that changed between `since` and `rev` are scanned.
+    pub since: Option<String>,
+    /// Path to the quarantine file. Findings listed here are suppressed
+    /// from normal scans and verdict computation.
+    pub ignore_file: PathBuf,
+    /// When true, the scan appends new findings to `ignore_file` instead
+    /// of returning NOT SAFE.
+    pub quarantine: bool,
     pub max_binary_bytes: u64,
     pub max_chunk_bytes: usize,
     pub chunk_overlap_bytes: usize,
@@ -50,6 +59,25 @@ pub struct DetectorConfig {
     /// to its built-in SimHash near-duplicate matcher.
     #[serde(default)]
     pub embedding_model: Option<PathBuf>,
+    /// Optional path to the HuggingFace tokenizer.json for the ONNX
+    /// model. When unset and `embedding_bundled` is true, the default
+    /// `all-MiniLM-L6-v2` tokenizer is downloaded alongside the model.
+    #[serde(default)]
+    pub embedding_tokenizer: Option<PathBuf>,
+    /// Fetch the default bundled model (`sentence-transformers/all-MiniLM-L6-v2`)
+    /// on first use. The files are cached in the user's data directory.
+    #[serde(default)]
+    pub embedding_bundled: bool,
+
+    // --- LLM classifier ---
+    #[serde(default)]
+    pub llm_classifier: bool,
+    #[serde(default)]
+    pub llm_classifier_base_url: Option<String>,
+    #[serde(default)]
+    pub llm_classifier_model: Option<String>,
+    #[serde(default)]
+    pub llm_classifier_api_key_env: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -66,6 +94,9 @@ impl Default for ScanConfig {
             no_clone: false,
             keep: false,
             jobs: num_cpus_or_one(),
+            since: None,
+            ignore_file: PathBuf::from(".injector-detector-ignore"),
+            quarantine: false,
             max_binary_bytes: 1024 * 1024,
             max_chunk_bytes: 2048,
             chunk_overlap_bytes: 256,
@@ -80,6 +111,12 @@ impl Default for ScanConfig {
                 extra_canaries: Vec::new(),
                 extra_rules: Vec::new(),
                 embedding_model: None,
+                embedding_tokenizer: None,
+                embedding_bundled: false,
+                llm_classifier: false,
+                llm_classifier_base_url: None,
+                llm_classifier_model: None,
+                llm_classifier_api_key_env: None,
             },
         }
     }
@@ -118,6 +155,8 @@ struct DetectorSection {
     perplexity: TogglableSection,
     #[serde(default)]
     embedding: EmbeddingSection,
+    #[serde(default)]
+    llm_classifier: LlmClassifierSection,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -125,6 +164,21 @@ struct EmbeddingSection {
     enabled: Option<bool>,
     #[serde(default)]
     model: Option<PathBuf>,
+    #[serde(default)]
+    tokenizer: Option<PathBuf>,
+    #[serde(default)]
+    bundled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LlmClassifierSection {
+    enabled: Option<bool>,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -193,6 +247,25 @@ impl ScanConfig {
         }
         if let Some(v) = parsed.detectors.embedding.model {
             self.detectors.embedding_model = Some(v);
+        }
+        if let Some(v) = parsed.detectors.embedding.tokenizer {
+            self.detectors.embedding_tokenizer = Some(v);
+        }
+        if let Some(v) = parsed.detectors.embedding.bundled {
+            self.detectors.embedding_bundled = v;
+        }
+
+        if let Some(v) = parsed.detectors.llm_classifier.enabled {
+            self.detectors.llm_classifier = v;
+        }
+        if let Some(v) = parsed.detectors.llm_classifier.base_url {
+            self.detectors.llm_classifier_base_url = Some(v);
+        }
+        if let Some(v) = parsed.detectors.llm_classifier.model {
+            self.detectors.llm_classifier_model = Some(v);
+        }
+        if let Some(v) = parsed.detectors.llm_classifier.api_key_env {
+            self.detectors.llm_classifier_api_key_env = Some(v);
         }
         self.detectors.extra_canaries.extend(parsed.detectors.canary.tokens);
 

@@ -16,7 +16,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] Initial commit
 
 ### CLI
-- [x] `clap`-based CLI with positional `REPO`, `--rev`, `--config`, `--format`, `--fail-on`, `--include`, `--exclude`, `--no-clone`, **`--keep`**, `--jobs`
+- [x] `clap`-based CLI with positional `REPO`, `--rev`, `--config`, `--format`, `--fail-on`, `--include`, `--exclude`, `--no-clone`, `--keep`, **`--since`**, **`--quarantine`**, **`--ignore-file`**, `--jobs`
 - [x] Exit codes: `0` SAFE, `1` NOT SAFE, `2` scan error
 - [x] `tracing` / `tracing-subscriber` initialised with `RUST_LOG` env filter
 - [x] Walker emits `tracing::warn!` when `--rev` is silently dropped during the working-tree fallback
@@ -52,11 +52,12 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `Detector` trait + parallel `Engine` (rayon, sized by `--jobs`)
 - [x] Per-detector enable toggles via config
 - [x] **`heuristic`** — `yara-x` 1.14 backed scanner loading bundled `rules/builtin.yar` (9 rules) plus user `extra_rules` glob patterns
-- [x] **`hidden_chars`** — zero-width (Medium), bidi-override + tag-character (Critical), **plus Cyrillic / Greek homoglyph clusters in Latin words (High)**
+- [x] **`hidden_chars`** — zero-width (Medium), bidi-override + tag-character (Critical), plus Cyrillic / Greek homoglyph clusters in Latin words (High)
 - [x] **`encoded`** — base64 / hex / URL-encoded recursive decode + needle re-scan
 - [x] **`canary`** — Rebuff-style `[CANARY:<uuid>]` regex + user-supplied tokens
 - [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`
-- [x] **`embedding`** — 64-bit SimHash over normalised tokens vs ~30 canonical injection payloads; **real ONNX backend via `ort` 2.0.0-rc.10 behind the `embeddings` feature**, loading a user-supplied sentence-transformer model and matching by cosine similarity with mean-pooling over the token axis
+- [x] **`embedding`** — 64-bit SimHash fallback over ~30 canonical injection payloads; **real ONNX backend via `ort` 2.0.0-rc.10 behind the `embeddings` feature**, with a **real HuggingFace tokenizer via the `tokenizers` crate** and an opt-in **`bundled = true`** mode that fetches `sentence-transformers/all-MiniLM-L6-v2` (ONNX model + `tokenizer.json`) from HuggingFace into the user cache dir on first use
+- [x] **`llm_classifier`** — live detector behind the `llm` Cargo feature. Sends chunks to an OpenAI-compatible `chat/completions` endpoint and expects a `{"verdict","confidence","reason"}` JSON response. Configurable base URL, model, and API-key env var. Conservative: API or parse errors are treated as SAFE so the detector can't halt the build on transient outages. Key missing → detector no-ops with a warning.
 
 ### Bundled assets
 - [x] `rules/builtin.yar` — 9 YARA rules with severity / confidence / message metadata
@@ -81,21 +82,26 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] Per-detector enable toggles
 - [x] `[detectors.heuristic] extra_rules` glob list
 - [x] `[detectors.canary] tokens` user canary list
-- [x] `[detectors.embedding] model` ONNX model path
+- [x] `[detectors.embedding] model`, `tokenizer`, `bundled`
+- [x] `[detectors.llm_classifier] base_url`, `model`, `api_key_env`
+
+### Incremental + quarantine (`src/quarantine.rs`, `src/walk.rs`)
+- [x] **Incremental scan** — `--since <REF>` computes the set of paths that differ between `--since` and `--rev` via `gix::traverse` and restricts the walker to just those files. Works on both the gix tree path and the working-tree fallback.
+- [x] **Auto-quarantine review queue** — TOML-backed `.injector-detector-ignore` file. `--quarantine` appends current findings to the ignore file and clears the report so the build passes (for human review). Normal scans filter out any finding whose `(detector, path, message, evidence_hash)` matches an entry. Path defaults to `.injector-detector-ignore` and can be overridden with `--ignore-file`.
 
 ### Tests
-- [x] **28 unit tests** across `types`, `chunk`, `aggregate`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`
-- [x] **15 integration tests** in `tests/integration.rs` driving the public `scan()` API
+- [x] **31 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`
+- [x] **17 integration tests** in `tests/integration.rs` driving the public `scan()` API (adds quarantine round-trip and incremental no-op)
 - [x] **4 property tests** (`proptest`) in `tests/properties.rs` for chunker boundary safety, span correctness, multibyte input, overlap invariants
 - [x] **3 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters
-- [x] **gix tree walker test** — `tests/common/git_helper.rs` builds a real git repo programmatically via `gix::init` + `write_blob` + `write_object` + `commit_as`; two tests verify the gix snapshot path is taken (committed-content-only finding, working-tree-only-clean negative)
+- [x] **gix tree walker test** — `tests/common/git_helper.rs` builds a real git repo programmatically via `gix::init` + `write_blob` + `write_object` + `commit_as`; tests verify the gix snapshot path is taken (committed-content-only finding, working-tree-only-clean negative, and incremental HEAD→HEAD no-op)
 - [x] `tests/fixtures/clean/` — README, Rust source, JSON config (verdict: SAFE)
 - [x] `tests/fixtures/dirty/` — one fixture per detector / extractor:
   - `heuristic.md`, `hidden.txt`, `encoded.md`, `canary.txt`
   - `notebook.ipynb`, `source.py`, `markup.html`, `workflow.yaml`
   - `high_entropy.txt`
-- [x] Both default and `--features embeddings` build clean
-- [x] **Total: 50 tests passing**
+- [x] All feature combinations build clean: default, `--features embeddings`, `--features llm`, `--all-features`
+- [x] **Total: 55 tests passing under every feature set**
 
 ## In progress
 
@@ -103,11 +109,7 @@ _(nothing currently in progress)_
 
 ## Planned — medium term
 
-- [ ] **Bundle a default ONNX model** — the ONNX backend currently requires the user to point at their own model via `[detectors.embedding] model = "..."`. Shipping a small quantised sentence-transformer (e.g. `all-MiniLM-L6-v2`) would make the backend usable out of the box.
-- [ ] **Real tokenizer for the ONNX backend** — the current path uses a placeholder whitespace tokeniser (ids = 1..=N). A bundled model should be paired with its original HuggingFace tokenizer (via the `tokenizers` crate) for accurate embeddings.
-- [ ] **Live LLM-based classifier detector** — DESIGN.md §11. Would let the tool consult a hosted or local model at scan time; default off, opt-in.
-- [ ] **Incremental scan mode** — only re-evaluate files changed since a base ref (DESIGN.md §11).
-- [ ] **Auto-quarantine review queue** — write a `.injector-detector-ignore` file for review instead of failing the build outright (DESIGN.md §11).
+_(nothing currently planned — the DESIGN.md §11 roadmap and all previously-listed follow-ups are shipped)_
 
 ## Out of scope
 
