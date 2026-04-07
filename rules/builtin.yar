@@ -80,6 +80,73 @@ rule chatml_role_hijack {
         any of them
 }
 
+rule llama2_role_hijack {
+    meta:
+        severity = "critical"
+        confidence = "0.95"
+        message = "Llama 2 / Mistral role-hijack token"
+    strings:
+        $a = "[INST]"
+        $b = "[/INST]"
+        $c = "<<SYS>>"
+        $d = "<</SYS>>"
+    condition:
+        any of them
+}
+
+rule llama3_role_hijack {
+    meta:
+        severity = "critical"
+        confidence = "0.95"
+        message = "Llama 3 chat-template role-hijack token"
+    strings:
+        $a = "<|begin_of_text|>"
+        $b = "<|end_of_text|>"
+        $c = "<|start_header_id|>"
+        $d = "<|end_header_id|>"
+        $e = "<|eot_id|>"
+    condition:
+        any of them
+}
+
+rule gpt_endoftext {
+    meta:
+        severity = "critical"
+        confidence = "0.95"
+        message = "GPT family end-of-text / FIM token"
+    strings:
+        $a = "<|endoftext|>"
+        $b = "<|fim_prefix|>"
+        $c = "<|fim_middle|>"
+        $d = "<|fim_suffix|>"
+    condition:
+        any of them
+}
+
+rule claude_role_hijack {
+    meta:
+        severity = "high"
+        confidence = "0.7"
+        message = "Claude / Anthropic conversation role marker"
+    strings:
+        $a = "\n\nHuman:"
+        $b = "\n\nAssistant:"
+    condition:
+        any of them
+}
+
+rule gemini_role_hijack {
+    meta:
+        severity = "critical"
+        confidence = "0.9"
+        message = "Gemini / Gemma chat-template role token"
+    strings:
+        $a = "<start_of_turn>"
+        $b = "<end_of_turn>"
+    condition:
+        any of them
+}
+
 rule alpaca_instruction_marker {
     meta:
         severity = "high"

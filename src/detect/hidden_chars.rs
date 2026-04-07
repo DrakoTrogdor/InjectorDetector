@@ -151,6 +151,15 @@ impl Detector for HiddenCharsDetector {
     fn analyze(&self, chunk: &TextChunk) -> Vec<Finding> {
         let mut out = Vec::new();
 
+        // 0. Combining-mark obfuscation. Two passes:
+        //    a. Stacked marks on a single base character (zalgo).
+        //    b. High count of overlay marks (strikethrough U+0336 /
+        //       underline U+0332) — Parseltongue's "strikethrough"
+        //       transform applies one mark per letter, never stacks
+        //       them, so we detect by total count instead of stack
+        //       depth.
+        detect_combining_obfuscation(chunk, &mut out);
+
         // 1. Invisible characters
         for (i, c) in chunk.text.char_indices() {
             let abs = chunk.span.start + i;
@@ -236,6 +245,73 @@ impl Detector for HiddenCharsDetector {
     }
 }
 
+/// True for code points in the Combining Diacritical Marks block
+/// (U+0300–U+036F). This is the range used by Parseltongue's `zalgo`
+/// transform, the strikethrough overlay (U+0336), and the underline
+/// overlay (U+0332). Other combining-mark blocks exist (Arabic,
+/// Devanagari, etc.) but those carry meaningful linguistic content in
+/// real text — restricting to U+0300–U+036F keeps false-positive rate
+/// near zero on non-English content.
+fn is_latin_combining_mark(c: char) -> bool {
+    matches!(c, '\u{0300}'..='\u{036F}')
+}
+
+fn detect_combining_obfuscation(chunk: &TextChunk, out: &mut Vec<Finding>) {
+    let mut stack_depth = 0usize;
+    let mut max_stack = 0usize;
+    let mut total_marks = 0usize;
+    let mut overlay_marks = 0usize;
+
+    for c in chunk.text.chars() {
+        if is_latin_combining_mark(c) {
+            stack_depth += 1;
+            max_stack = max_stack.max(stack_depth);
+            total_marks += 1;
+            if c == '\u{0336}' || c == '\u{0332}' {
+                overlay_marks += 1;
+            }
+        } else {
+            stack_depth = 0;
+        }
+    }
+
+    // Zalgo: any base character with 2+ stacked combining marks. Real
+    // precomposed Vietnamese, French, German, etc. has at most 1 mark
+    // per base after NFD; 2+ stacked marks is extremely unusual.
+    if max_stack >= 2 {
+        out.push(Finding {
+            detector: "hidden_chars".to_string(),
+            category: Category::HiddenChars,
+            severity: Severity::High,
+            confidence: 0.9,
+            path: chunk.path.clone(),
+            span: chunk.span,
+            message: format!(
+                "stacked combining marks (zalgo-style obfuscation, max stack {max_stack}, {total_marks} marks total)"
+            ),
+            evidence: format!("max_stack={max_stack}, total_marks={total_marks}"),
+        });
+    }
+
+    // Overlay marks (strikethrough / underline). Parseltongue applies
+    // one per letter; ≥ 5 in a single chunk is a clear signal of an
+    // overlay-style transform.
+    if overlay_marks >= 5 {
+        out.push(Finding {
+            detector: "hidden_chars".to_string(),
+            category: Category::HiddenChars,
+            severity: Severity::Medium,
+            confidence: 0.85,
+            path: chunk.path.clone(),
+            span: chunk.span,
+            message: format!(
+                "combining overlay marks (strikethrough/underline obfuscation, {overlay_marks} overlay marks)"
+            ),
+            evidence: format!("overlay_marks={overlay_marks}"),
+        });
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_homoglyph(
     text: &str,
@@ -315,6 +391,43 @@ mod tests {
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].severity, Severity::Critical);
         assert!(f[0].message.contains("variation-selector-supplement"));
+    }
+
+    #[test]
+    fn flags_zalgo_stacked_combining_marks() {
+        // 'a' followed by 5 combining marks — classic zalgo glyph.
+        let s = "hello a\u{0301}\u{0302}\u{0303}\u{0304}\u{0305} world";
+        let f = HiddenCharsDetector.analyze(&chunk(s));
+        assert!(
+            f.iter().any(|x| x.message.contains("zalgo")),
+            "expected zalgo finding, got {f:?}"
+        );
+    }
+
+    #[test]
+    fn flags_strikethrough_overlay_marks() {
+        // Each letter followed by U+0336 — Parseltongue strikethrough.
+        let s = "i\u{0336}g\u{0336}n\u{0336}o\u{0336}r\u{0336}e\u{0336}";
+        let f = HiddenCharsDetector.analyze(&chunk(s));
+        assert!(
+            f.iter()
+                .any(|x| x.message.contains("strikethrough/underline")),
+            "expected overlay-mark finding, got {f:?}"
+        );
+    }
+
+    #[test]
+    fn precomposed_accented_text_is_not_flagged_as_combining() {
+        // Vietnamese / French / German / Spanish text uses precomposed
+        // characters (NFKC keeps them composed). Should not fire the
+        // combining-mark detector.
+        let s = "café résumé naïve façade Köln Hà Nội";
+        let f = HiddenCharsDetector.analyze(&chunk(s));
+        assert!(
+            f.iter().all(|x| !x.message.contains("zalgo")
+                && !x.message.contains("strikethrough/underline")),
+            "precomposed accented text must not trip combining-mark detector, got {f:?}"
+        );
     }
 
     #[test]
