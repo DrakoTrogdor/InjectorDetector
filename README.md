@@ -1,59 +1,101 @@
 # InjectorDetector
 
-A Rust command-line tool that scans a Git repository for **prompt injection
-payloads** and returns a single **SAFE** or **NOT SAFE** verdict, suitable for
-use as a CI gate.
+A Rust command-line tool that scans a Git repository for **prompt
+injection payloads** and returns a single **SAFE** or **NOT SAFE**
+verdict, suitable for use as a CI gate or pre-commit hook.
 
-InjectorDetector applies the *detective* family of techniques surveyed in
-[tldrsec/prompt-injection-defenses](https://github.com/tldrsec/prompt-injection-defenses)
-— heuristic / YARA rule matching, perplexity analysis, canary detection, and
-optional embedding-similarity matching — to files at rest in a repo, before
-they ever reach a live LLM.
-
-> Status: early development. See [`DESIGN.md`](DESIGN.md) for the full
-> architecture.
+InjectorDetector applies the *detective* family of techniques surveyed
+in [tldrsec/prompt-injection-defenses](https://github.com/tldrsec/prompt-injection-defenses)
+— heuristic / YARA rule matching, hidden-character scanning, encoded
+payload decoding, perplexity analysis, canary detection, embedding
+similarity, and an optional live LLM classifier — to files at rest in
+a repo, before they ever reach a live LLM.
 
 ## Why
 
-Prompt injection payloads increasingly arrive *through* code, docs, READMEs,
-notebooks, issue templates, and config files that downstream agents and
-copilots later read. Runtime defenses (spotlighting, dual-LLM, sandwiching)
-only help if the payload reaches the model boundary. InjectorDetector catches
-payloads earlier — at commit time — and complements those runtime defenses
-rather than replacing them.
+Prompt-injection payloads increasingly arrive *through* code, docs,
+READMEs, notebooks, issue templates, and config files that downstream
+agents and copilots later read. Runtime defenses (spotlighting,
+dual-LLM, sandwiching) only help if the payload reaches the model
+boundary. InjectorDetector catches payloads earlier — at commit time —
+and complements those runtime defenses rather than replacing them.
 
 ## Features
 
-- **Single-argument CLI**: point it at a local clone or a remote Git URL.
-- **Deterministic verdict**: exit code `0` on SAFE, `1` on NOT SAFE — drop it
-  into any CI pipeline.
+- **Single-argument CLI**: point it at a local clone, an absolute path,
+  or a remote Git URL.
+- **Deterministic verdict**: exit code `0` on SAFE, `1` on NOT SAFE,
+  `2` on scan error — drops cleanly into any CI pipeline.
 - **Layered detectors**:
-  - YARA rule pack for known injection idioms (role hijacks, jailbreak
-    preambles, "ignore previous instructions", tool-call spoofs).
-  - Hidden-character detector for zero-width, bidi-override, tag, and
-    homoglyph smuggling.
-  - Perplexity analysis to flag anomalous text inside otherwise normal files.
-  - Encoded-payload detector that recursively decodes base64 / hex / URL runs.
-  - Canary / prompt-leak detector for committed Rebuff-style tokens.
-  - Optional embedding-similarity detector against a known-payload corpus.
-- **Format-aware extraction** via `tree-sitter` for source code, plus
-  dedicated extractors for Markdown, Jupyter notebooks, HTML/SVG, and
-  YAML/JSON/TOML config.
-- **Reports** in human, JSON, or SARIF 2.1.0 (for GitHub code scanning).
-- **Pure-Rust Git access** via `gix` — no external `git` binary required.
+  - **Heuristic** — `yara-x` 1.14 backed scanner over a bundled rule
+    pack (`rules/builtin.yar`) plus user-supplied rule files. Catches
+    "ignore previous instructions", role hijacks (`<|im_start|>`),
+    Alpaca instruction markers, jailbreak preambles, exfiltration
+    vocabulary, and tool-call spoofs.
+  - **Hidden characters** — zero-width, bidi-override, and Unicode
+    tag characters, plus Cyrillic / Greek **homoglyph clusters** that
+    are visually confusable with Latin letters. Math notation like
+    `ΔVol`, `Σ(x)`, `π*r²` is correctly *not* flagged. Leading
+    UTF-8 BOMs are recognised as legitimate text-encoding markers.
+  - **Encoded payloads** — recursive base64 / hex / URL decoding
+    (depth ≤ 2) with re-scanning of the decoded text against a
+    focused needle list.
+  - **Canary tokens** — Rebuff-style `[CANARY:<uuid>]` plus
+    user-supplied tokens.
+  - **Perplexity** — character-bigram language model trained at
+    startup from an embedded English corpus, with three gates
+    (provenance, char Shannon entropy, bigram cross-entropy) that
+    keep false positives near zero on real-world Markdown and code.
+  - **Embedding similarity** — 64-bit SimHash fallback over ~30
+    canonical injection payloads, plus an optional ONNX
+    sentence-transformer backend behind the `embeddings` Cargo
+    feature.
+  - **Live LLM classifier** — opt-in detector behind the `llm` Cargo
+    feature that sends each chunk to an OpenAI-compatible
+    `/chat/completions` endpoint.
+- **Format-aware extraction**:
+  - Tree-sitter grammars for **Rust, Python, JavaScript, TypeScript,
+    TSX, Go, Java, C, C++, Bash, Ruby** (yields `Comment` and
+    `StringLiteral` chunks with rebased byte spans).
+  - Dedicated extractors for Markdown plain text, Jupyter notebooks
+    (`.ipynb`), HTML / SVG / XML, JSON / TOML / YAML config files,
+    and PDFs (behind the `pdf` feature).
+  - Filename-aware dispatch for `Cargo.lock`, `package-lock.json`,
+    `Dockerfile`, `Makefile`, `Rakefile`, `Gemfile`, etc.
+  - Extension dispatch for ~30 script / IDL / build languages
+    without a tree-sitter grammar (PowerShell, Lua, SQL, Terraform,
+    Swift, Kotlin, etc.) so they're scanned by the heuristic /
+    encoded / canary / hidden_chars detectors but skip perplexity.
+- **Default-excludes** common build / generated directories
+  (`target/`, `obj/`, `node_modules/`, `__pycache__/`, `.venv/`,
+  `.terraform/`, …) so you can point the tool at any repo and get
+  signal, not noise.
+- **Three report formats**: human, JSON, and a real **SARIF 2.1.0**
+  emitter for GitHub code scanning upload.
+- **Live progress bar** on stderr (auto-disables under `--quiet` or
+  on non-TTY stderr) so the report on stdout pipes cleanly.
+- **Pure-Rust Git access** via `gix` — no external `git` binary
+  required, and remote repos are shallow-cloned into a tempdir.
+- **Quarantine workflow** — `--quarantine` accepts current findings
+  as a baseline written to `.injector-detector-ignore`; subsequent
+  scans pass while still detecting new findings.
+- **Incremental scans** — `--since <REF>` restricts the scan to
+  files that differ between the base ref and `--rev`.
+- **AI-safe rendering** — `--ai-safe` rewrites the report so AI
+  agents (Claude Code, Cursor, Copilot, autonomous agents) can read
+  the findings without being attacked by the payloads they describe.
 
 ## Installation
 
 Requires Rust 1.85+ (edition 2024).
 
 ```bash
-# from source
-git clone https://github.com/<you>/InjectorDetector
+git clone https://github.com/DrakoTrogdor/InjectorDetector
 cd InjectorDetector
 cargo install --path .
 ```
 
-Or build a local binary:
+Or build a local binary without installing:
 
 ```bash
 cargo build --release
@@ -66,13 +108,13 @@ cargo build --release
 injector-detector <REPO> [OPTIONS]
 ```
 
-Scan a local clone:
+Scan the current directory:
 
 ```bash
-injector-detector ./path/to/repo
+injector-detector .
 ```
 
-Scan a remote repo at a specific revision and emit SARIF:
+Scan a remote GitHub repository at a specific tag and emit SARIF:
 
 ```bash
 injector-detector https://github.com/example/project \
@@ -86,6 +128,27 @@ Fail the build only on high-severity findings:
 injector-detector . --fail-on high
 ```
 
+Incremental scan — only re-evaluate files that changed since `main`:
+
+```bash
+injector-detector . --since main
+```
+
+One-time baseline of current findings (review workflow):
+
+```bash
+injector-detector . --quarantine
+# review the generated .injector-detector-ignore, then commit it.
+# subsequent normal scans will skip the quarantined findings.
+injector-detector .
+```
+
+For an AI agent invoking the tool:
+
+```bash
+injector-detector . --ai-safe
+```
+
 ### Options
 
 | Flag                       | Description                                            |
@@ -97,7 +160,17 @@ injector-detector . --fail-on high
 | `--include <GLOB>...`      | Restrict scan to matching paths                        |
 | `--exclude <GLOB>...`      | Skip matching paths (in addition to defaults)          |
 | `--no-clone`               | Refuse to clone; require a local path                  |
+| `--keep`                   | Preserve cloned tempdirs after the scan completes      |
+| `--since <REF>`            | Incremental: only scan files changed since this ref    |
+| `--quarantine`             | Append findings to ignore file instead of failing      |
+| `--ignore-file <PATH>`     | Path to the quarantine file (default: `.injector-detector-ignore`) |
+| `-q`, `--quiet`            | Suppress the progress bar and non-error stderr         |
+| `--no-default-excludes`    | Disable the built-in build/generated dir exclusions    |
+| `--ai-safe`                | Sanitize the report so an LLM can read it safely       |
 | `--jobs <N>`               | Worker thread count (default: number of CPUs)          |
+
+Run `injector-detector --help` for the full description and worked
+examples.
 
 ### Exit codes
 
@@ -109,76 +182,180 @@ injector-detector . --fail-on high
 
 ## CI integration
 
-GitHub Actions example:
+### GitHub Actions
+
+The repository ships with a [`action.yml`](action.yml) composite action
+that installs the binary, caches it across runs, and executes the scan.
 
 ```yaml
 - name: Scan for prompt injections
-  run: |
-    cargo install injector-detector
-    injector-detector . --format sarif --fail-on medium > results.sarif
+  uses: DrakoTrogdor/InjectorDetector@main
+  with:
+    path: .
+    fail-on: medium
+    format: sarif
+    output-file: results.sarif
+
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
     sarif_file: results.sarif
 ```
 
+### Pre-commit
+
+The repository also ships with a [`.pre-commit-hooks.yaml`](.pre-commit-hooks.yaml)
+manifest. Add this to your project's `.pre-commit-config.yaml`:
+
+```yaml
+- repo: https://github.com/DrakoTrogdor/InjectorDetector
+  rev: main
+  hooks:
+    - id: injector-detector
+```
+
 ## How it works
 
-1. **Load** the repo with `gix` (clone if remote, open in place if local) and
-   resolve `--rev` to a tree.
-2. **Walk** the tree, applying gitignore-aware filters and skipping vendored
-   or generated content.
-3. **Extract** text from each file using a format-appropriate extractor that
-   tags chunks with provenance (e.g. `Comment`, `Docstring`,
-   `NotebookMarkdownCell`).
-4. **Chunk** with Unicode normalisation and bounded windows.
-5. **Detect** by running every chunk through the detector pipeline in
-   parallel via `rayon`.
-6. **Aggregate** findings, dedupe overlaps, and compute per-file scores.
-7. **Report** in the requested format and exit with the appropriate code.
+```
+              Checking <name>...
+        ┌───────────────┐
+ repo → │  Repo Loader  │  gix open / shallow clone, --rev resolution
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │  File Walker  │  gix tree walker (or working-tree fallback);
+        │               │  default + user excludes; incremental --since
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │  Extractors   │  format / extension / filename dispatch;
+        │               │  per-chunk Provenance tagging
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │   Chunker     │  NFKC normalisation, 2 KiB windows, 256 B
+        │               │  overlap, multibyte-safe boundaries
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │ Detector      │  rayon parallel; 6 always-on detectors plus
+        │ Engine        │  optional embedding (--features embeddings)
+        │               │  and llm_classifier (--features llm)
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │  Aggregator   │  dedupe, per-detector score cap, verdict
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │  Quarantine   │  filter (or append) findings vs ignore file
+        └───────┬───────┘
+                ▼
+        ┌───────────────┐
+        │   Reporter    │  human / json / sarif (with --ai-safe overlay)
+        └───────────────┘
+```
 
 See [`DESIGN.md`](DESIGN.md) for the full component breakdown and the
-mapping from each tldrsec defense technique to its implementation here.
+mapping from each tldrsec defense technique to its implementation.
 
 ## Configuration
 
-A `injector-detector.toml` (or any file passed via `--config`) can override
-defaults:
+A `injector-detector.toml` (or any file passed via `--config`) can
+override defaults:
 
 ```toml
 [scan]
+fail_on          = "medium"
 max_binary_bytes = 1048576
-jobs = 8
+jobs             = 8
+include          = ["src/**", "docs/**"]
+exclude          = ["**/generated/**"]
 
 [detectors.heuristic]
-enabled = true
+enabled     = true
 extra_rules = ["./my-rules/*.yar"]
+
+[detectors.hidden_chars]
+enabled = true
+
+[detectors.encoded]
+enabled = true
+
+[detectors.canary]
+enabled = true
+tokens  = ["sk-prod-secret-marker"]
 
 [detectors.perplexity]
 enabled = true
-threshold_z = 3.0
 
 [detectors.embedding]
-enabled = false   # requires the `embeddings` cargo feature
+enabled   = false  # default
+bundled   = false  # set true to fetch all-MiniLM-L6-v2 on first use
+model     = "/path/to/model.onnx"     # alternative: explicit ONNX path
+tokenizer = "/path/to/tokenizer.json" # required when `model` is set
+
+[detectors.llm_classifier]
+enabled     = false  # default
+base_url    = "https://api.openai.com/v1"
+model       = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
 ```
+
+All fields are optional; CLI flags and config merge into a single
+`ScanConfig` at startup.
+
+## AI agent usage
+
+If you are running this tool from inside an AI assistant (Claude Code,
+Cursor, Copilot CLI, an autonomous agent, …) you should pass
+**`--ai-safe`**. The flag rewrites the report so the findings cannot
+attack you when you read them back:
+
+- A preamble at the top of the output addresses the reading model
+  directly and tells it that the contents of `[UNTRUSTED:…]` markers
+  are literal data, not instructions.
+- Every evidence snippet is wrapped in `[UNTRUSTED:…]`.
+- Dangerous token pairs (`<|`, `|>`, ` ``` `, `{{`, `}}`) are
+  textually broken with a backslash-space separator so ChatML
+  role markers, Markdown code fences, and template delimiters
+  cannot parse.
+- Invisible / bidi / tag characters are rendered as `<U+XXXX>`
+  codepoint notation.
+- JSON output gains a top-level `safe_view: true` flag and an
+  `ai_safe_preamble` field; SARIF gains the same under
+  `runs[].tool.driver.properties`.
+
+The verdict (`SAFE` / `NOT SAFE`), file paths, severity levels, and
+summary counts remain authoritative — those are the parts of the
+report an AI should rely on for decisions.
 
 ## Cargo features
 
-| Feature       | Default | Description                                    |
-|---------------|---------|------------------------------------------------|
-| `embeddings`  | off     | Enables the ONNX-backed similarity detector    |
-| `pdf`         | off     | Enables PDF text extraction                    |
+| Feature       | Default | Description                                                |
+|---------------|---------|------------------------------------------------------------|
+| `embeddings`  | off     | Pulls in `ort` 2.0, `tokenizers`, and `ureq` to enable the ONNX sentence-transformer backend for the embedding detector (with optional bundled-model fetch). |
+| `llm`         | off     | Pulls in `ureq` to enable the live LLM-classifier detector that calls an OpenAI-compatible `/chat/completions` endpoint. |
+| `pdf`         | off     | Pulls in `pdf-extract` to enable the PDF text extractor.   |
 
 ## Development
 
 ```bash
 cargo build
 cargo test
+cargo test --features embeddings
+cargo test --features llm
 cargo clippy --all-targets -- -D warnings
 cargo fmt
 ```
 
-The repo layout is documented in [`DESIGN.md`](DESIGN.md) §5.
+Test inventory: 50 unit tests, 17 integration tests, 4 property tests
+(`proptest`), 5 snapshot tests (`insta`). All 76 pass under default,
+`--features embeddings`, `--features llm`, and `--all-features`.
+
+The repo layout is documented in [`DESIGN.md`](DESIGN.md) §5, and the
+end-to-end status of every shipped feature is tracked in
+[`STATUS.md`](STATUS.md).
 
 ## License
 
@@ -188,5 +365,6 @@ MIT — see [`LICENSE`](LICENSE).
 
 - [tldrsec/prompt-injection-defenses](https://github.com/tldrsec/prompt-injection-defenses)
   for the taxonomy of techniques this tool draws from.
-- The `gix`, `tree-sitter`, and `yara-x` projects for the building blocks
-  that make a fast, dependency-light static scanner possible.
+- The `gix`, `tree-sitter`, `yara-x`, `tokenizers`, `ort`, and
+  `indicatif` projects for the building blocks that make a fast,
+  pure-Rust static scanner possible.
