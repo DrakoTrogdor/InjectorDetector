@@ -62,14 +62,54 @@ pub fn extract(entry: &WalkEntry) -> Result<Vec<TextChunk>> {
         // are machine-generated and not natural language, so we tag
         // them with ConfigString so the heuristic / encoded / canary
         // / hidden-char detectors still run but perplexity skips them.
-        Some("lock" | "sum") => {
-            if entry.bytes.contains(&0) {
-                return Ok(Vec::new());
-            }
-            let Ok(text) = std::str::from_utf8(&entry.bytes) else {
-                return Ok(Vec::new());
-            };
-            return Ok(chunk_text(&entry.path, text, Provenance::ConfigString));
+        Some("lock" | "sum") => return Ok(non_prose(&entry.path, &entry.bytes)),
+        // Scripts and source files without a bundled tree-sitter
+        // grammar. Treating these as Prose would pipe them straight
+        // into the perplexity detector, which fires aggressively on
+        // non-English code. We tag them as ConfigString instead so
+        // the bigram scorer skips them (via `is_natural_language`)
+        // while the other detectors still run normally.
+        Some(
+            "ps1" | "psm1" | "psd1"        // PowerShell
+            | "bat" | "cmd"                 // Windows batch
+            | "pl" | "pm"                   // Perl
+            | "php" | "phtml" | "phps"      // PHP
+            | "lua"                         // Lua
+            | "r"                           // R
+            | "jl"                          // Julia
+            | "ex" | "exs" | "erl" | "hrl"  // Elixir / Erlang
+            | "swift"                       // Swift
+            | "kt" | "kts"                  // Kotlin
+            | "scala" | "sc" | "sbt"        // Scala
+            | "dart"                        // Dart
+            | "m" | "mm"                    // Objective-C / MATLAB
+            | "cs" | "csx"                  // C#
+            | "fs" | "fsi" | "fsx"          // F#
+            | "hs" | "lhs"                  // Haskell
+            | "clj" | "cljc" | "cljs"       // Clojure
+            | "ml" | "mli"                  // OCaml
+            | "vb" | "vbs"                  // VB / VBScript
+            | "pas" | "pp"                  // Pascal
+            | "asm" | "s"                   // Assembly
+            | "sql"                         // SQL
+            | "proto" | "fbs" | "thrift"    // IDLs
+            | "ini" | "cfg" | "conf" | "properties" // plain config
+            | "tf" | "tfvars" | "hcl"       // Terraform / HCL
+            | "nix"                         // Nix
+            | "dockerfile" | "containerfile" // containers (rare as ext)
+            | "mk" | "mak"                  // Makefiles (as extension)
+            | "gradle"                      // Gradle build scripts
+            | "cmake"                       // CMake
+        ) => return Ok(non_prose(&entry.path, &entry.bytes)),
+        _ => {}
+    }
+
+    // Well-known filenames that aren't distinguished by extension.
+    match filename {
+        "Dockerfile" | "Containerfile" | "Makefile" | "makefile" | "GNUmakefile"
+        | "CMakeLists.txt" | "Rakefile" | "Gemfile" | "Procfile" | "Vagrantfile" | "Jenkinsfile"
+        | "Brewfile" | "Podfile" | "Cartfile" | "Justfile" | "justfile" | ".env" | ".envrc" => {
+            return Ok(non_prose(&entry.path, &entry.bytes));
         }
         _ => {}
     }
@@ -81,4 +121,17 @@ pub fn extract(entry: &WalkEntry) -> Result<Vec<TextChunk>> {
         return Ok(Vec::new());
     };
     Ok(text::extract_text(&entry.path, text_str))
+}
+
+/// Chunk the file as plain text but tag the chunks with `ConfigString`
+/// provenance so the perplexity detector skips them. Used for script /
+/// IDL / build / env files that don't have a tree-sitter grammar.
+fn non_prose(path: &std::path::Path, bytes: &[u8]) -> Vec<TextChunk> {
+    if bytes.contains(&0) {
+        return Vec::new();
+    }
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Vec::new();
+    };
+    chunk_text(path, text, Provenance::ConfigString)
 }

@@ -38,6 +38,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `text` — UTF-8 / Markdown plain-text fallback
 - [x] `source` — tree-sitter dispatcher for **Rust, Python, JavaScript, TypeScript, TSX, Go, Java, C, C++, Bash, Ruby** (comments + string literals with rebased byte spans)
 - [x] **Lockfile-aware dispatch** — `Cargo.lock` → `extract_toml`; `package-lock.json` / `composer.lock` / `bun.lockb` → `extract_json`; generic `*.lock` / `*.sum` → text with `ConfigString` provenance so perplexity stays off
+- [x] **Script/IDL/build-file dispatch** — extensions without a bundled tree-sitter grammar are routed to plain-text chunks with `ConfigString` provenance so perplexity skips them while the other detectors still run. Covers PowerShell (`ps1/psm1/psd1`), Windows batch, Perl, PHP, Lua, R, Julia, Elixir/Erlang, Swift, Kotlin, Scala, Dart, Objective-C, C#, F#, Haskell, Clojure, OCaml, VB, Pascal, Assembly, SQL, Protobuf / FlatBuffers / Thrift, Terraform/HCL, Nix, Gradle, CMake, INI/CFG/CONF/properties, and well-known filename fixtures (`Dockerfile`, `Makefile`, `Rakefile`, `Gemfile`, `Procfile`, `Vagrantfile`, `Jenkinsfile`, `CMakeLists.txt`, `.env`, etc.)
 - [x] `notebook` — Jupyter `.ipynb` markdown / code / output cells
 - [x] `config` — JSON, TOML, **YAML** string-value walkers
 - [x] `markup` — HTML / SVG / XML via `scraper` (text, comments, curated attributes)
@@ -54,10 +55,13 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `Detector` trait + parallel `Engine` (rayon, sized by `--jobs`)
 - [x] Per-detector enable toggles via config
 - [x] **`heuristic`** — `yara-x` 1.14 backed scanner loading bundled `rules/builtin.yar` (9 rules) plus user `extra_rules` glob patterns
-- [x] **`hidden_chars`** — zero-width (Medium), bidi-override + tag-character (Critical), plus Cyrillic / Greek homoglyph clusters in Latin words (High)
+- [x] **`hidden_chars`** — zero-width (Medium), bidi-override + tag-character (Critical), plus Latin words containing Cyrillic or Greek characters that are **visually confusable** with a specific Latin letter (High). Math/science notation like `ΔVol`, `Σ(x)`, `π*r²`, `λ-calc` is deliberately not flagged — Δ, Σ, π, λ, μ, σ, θ, φ, ψ, ω are unambiguously non-Latin and their presence in a Latin word is legitimate scientific usage.
 - [x] **`encoded`** — base64 / hex / URL-encoded recursive decode + needle re-scan
 - [x] **`canary`** — Rebuff-style `[CANARY:<uuid>]` regex + user-supplied tokens
-- [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`; thresholds tightened to 3.3 / 3.8 nats/symbol (above the dense-technical-prose band) and limited via `Provenance::is_natural_language` to only fire on prose-shaped chunks (plain text, Markdown, docstrings, notebook markdown cells, HTML body text, PDF text) — structured content like config values, code literals, HTML attributes, and lockfiles is skipped
+- [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`. Three-gate filtering:
+  - **Provenance gate**: only fires on `is_natural_language()` chunks (Prose / Docstring / NotebookMarkdownCell / HtmlText / PdfText). Config values, code literals, HTML attributes, lockfiles, and script-extension files are skipped.
+  - **Character Shannon-entropy gate**: requires ≥ 4.5 bits of char-distribution entropy, which filters ASCII art / box drawings / tables that have legitimately-high bigram cross-entropy but very low character diversity.
+  - **Bigram cross-entropy gate**: 5.0 nats/symbol (Medium) / 5.6 nats/symbol (High). Above the entire natural range of English prose, dense technical docs, and mixed Markdown sections — perplexity is positioned as the last-resort safety net for content the encoded / hidden_chars detectors miss.
 - [x] **`embedding`** — 64-bit SimHash fallback over ~30 canonical injection payloads; **real ONNX backend via `ort` 2.0.0-rc.10 behind the `embeddings` feature**, with a **real HuggingFace tokenizer via the `tokenizers` crate** and an opt-in **`bundled = true`** mode that fetches `sentence-transformers/all-MiniLM-L6-v2` (ONNX model + `tokenizer.json`) from HuggingFace into the user cache dir on first use
 - [x] **`llm_classifier`** — live detector behind the `llm` Cargo feature. Sends chunks to an OpenAI-compatible `chat/completions` endpoint and expects a `{"verdict","confidence","reason"}` JSON response. Configurable base URL, model, and API-key env var. Conservative: API or parse errors are treated as SAFE so the detector can't halt the build on transient outages. Key missing → detector no-ops with a warning.
 
@@ -92,7 +96,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **Auto-quarantine review queue** — TOML-backed `.injector-detector-ignore` file. `--quarantine` appends current findings to the ignore file and clears the report so the build passes (for human review). Normal scans filter out any finding whose `(detector, path, message, evidence_hash)` matches an entry. Path defaults to `.injector-detector-ignore` and can be overridden with `--ignore-file`.
 
 ### Tests
-- [x] **33 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`
+- [x] **36 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`
 - [x] **17 integration tests** in `tests/integration.rs` driving the public `scan()` API (adds quarantine round-trip and incremental no-op)
 - [x] **4 property tests** (`proptest`) in `tests/properties.rs` for chunker boundary safety, span correctness, multibyte input, overlap invariants
 - [x] **3 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters
@@ -103,7 +107,7 @@ Update this file alongside the change that completes (or adds) an item.
   - `notebook.ipynb`, `source.py`, `markup.html`, `workflow.yaml`
   - `high_entropy.txt`
 - [x] All feature combinations build clean: default, `--features embeddings`, `--features llm`, `--all-features`
-- [x] **Total: 57 tests passing under every feature set**
+- [x] **Total: 60 tests passing under every feature set**
 
 ## In progress
 

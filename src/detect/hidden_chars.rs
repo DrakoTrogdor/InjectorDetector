@@ -4,23 +4,17 @@
 //!
 //! 1. **Invisible characters** — zero-width characters, bidi overrides,
 //!    and Unicode tag characters that smuggle payloads past human review.
-//! 2. **Homoglyph clusters** — Cyrillic or Greek code points sitting
-//!    inside an otherwise-ASCII Latin word (e.g. Cyrillic `а` U+0430 in
-//!    `pаyload`). Used to construct lookalike URLs, identifiers, and
-//!    instruction-override phrases that humans skim past.
+//! 2. **Homoglyph clusters** — Latin words that contain Cyrillic or Greek
+//!    characters which are *visually confusable* with a specific Latin
+//!    letter (e.g. Cyrillic `а` U+0430 in `pаyload`). Only confusables
+//!    fire; math/science notation like `ΔVol`, `Σ(x)`, `π*r²`, `λ-calc`
+//!    is explicitly *not* flagged because the Greek letters involved
+//!    (Δ, Σ, π, λ, μ, σ, θ, φ, ψ, ω) are not Latin look-alikes.
 
 use super::{Category, Detector};
 use crate::types::{ByteSpan, Finding, Severity, TextChunk};
 
 pub struct HiddenCharsDetector;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Script {
-    Latin,
-    Cyrillic,
-    Greek,
-    Other,
-}
 
 fn classify_invisible(c: char) -> Option<&'static str> {
     match c {
@@ -31,18 +25,89 @@ fn classify_invisible(c: char) -> Option<&'static str> {
     }
 }
 
-fn script_of(c: char) -> Script {
-    if c.is_ascii_alphabetic() {
-        Script::Latin
-    } else if matches!(c, '\u{0400}'..='\u{04FF}' | '\u{0500}'..='\u{052F}') {
-        // Cyrillic + Cyrillic Supplement
-        Script::Cyrillic
-    } else if matches!(c, '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}') {
-        // Greek + Greek Extended
-        Script::Greek
-    } else {
-        Script::Other
+/// Returns the script kind ("cyrillic" / "greek") if `c` is a non-Latin
+/// character that is **visually confusable with a specific Latin letter**.
+/// Pure foreign letters (Δ, Σ, π, ф, ш, Ж, …) return `None` — they are
+/// unambiguously non-Latin and their presence in a Latin word is almost
+/// always legitimate mathematical or linguistic usage, not a homoglyph
+/// attack.
+fn confusable_kind(c: char) -> Option<&'static str> {
+    // Cyrillic lookalikes for Latin letters.
+    let cyrillic = matches!(
+        c,
+        // lowercase: а в е к м н о р с т у х і ј ѕ ԁ ԛ ѡ ѕ ѵ
+        '\u{0430}' // а → a
+        | '\u{0432}' // в → B / b-ish
+        | '\u{0435}' // е → e
+        | '\u{043A}' // к → k
+        | '\u{043C}' // м → m (M-like)
+        | '\u{043D}' // н → H / n-ish
+        | '\u{043E}' // о → o
+        | '\u{0440}' // р → p
+        | '\u{0441}' // с → c
+        | '\u{0442}' // т → T (t-ish)
+        | '\u{0443}' // у → y
+        | '\u{0445}' // х → x
+        | '\u{0456}' // і → i
+        | '\u{0458}' // ј → j
+        | '\u{0455}' // ѕ → s
+        | '\u{0501}' // ԁ → d
+        | '\u{051B}' // ԛ → q
+        | '\u{051D}' // ԝ → w
+        | '\u{0461}' // ѡ → w-like
+        // uppercase: А В Е Н І Ј К М О Р С Т У Х Ѕ
+        | '\u{0410}' // А → A
+        | '\u{0412}' // В → B
+        | '\u{0415}' // Е → E
+        | '\u{041D}' // Н → H
+        | '\u{0406}' // І → I
+        | '\u{0408}' // Ј → J
+        | '\u{041A}' // К → K
+        | '\u{041C}' // М → M
+        | '\u{041E}' // О → O
+        | '\u{0420}' // Р → P
+        | '\u{0421}' // С → C
+        | '\u{0422}' // Т → T
+        | '\u{0423}' // У → Y
+        | '\u{0425}' // Х → X
+        | '\u{0405}' // Ѕ → S
+    );
+    if cyrillic {
+        return Some("cyrillic");
     }
+    // Greek lookalikes for Latin letters. Math-shaped letters like
+    // Δ (U+0394) / Σ (U+03A3) / π (U+03C0) / λ (U+03BB) / μ (U+03BC)
+    // / σ (U+03C3) / θ (U+03B8) / φ (U+03C6) / ψ (U+03C8) / ω (U+03C9)
+    // are deliberately excluded — their presence in code or docs is
+    // almost always legitimate scientific notation.
+    let greek = matches!(
+        c,
+        // lowercase letter-shaped
+        '\u{03BF}' // ο → o
+        | '\u{03B9}' // ι → i
+        | '\u{03BA}' // κ → k (letter-like usage in some fonts)
+        | '\u{03C1}' // ρ → p
+        | '\u{03C7}' // χ → x
+        // uppercase letter-shaped (visually identical to Latin)
+        | '\u{0391}' // Α → A
+        | '\u{0392}' // Β → B
+        | '\u{0395}' // Ε → E
+        | '\u{0396}' // Ζ → Z
+        | '\u{0397}' // Η → H
+        | '\u{0399}' // Ι → I
+        | '\u{039A}' // Κ → K
+        | '\u{039C}' // Μ → M
+        | '\u{039D}' // Ν → N
+        | '\u{039F}' // Ο → O
+        | '\u{03A1}' // Ρ → P
+        | '\u{03A4}' // Τ → T
+        | '\u{03A5}' // Υ → Y
+        | '\u{03A7}' // Χ → X
+    );
+    if greek {
+        return Some("greek");
+    }
+    None
 }
 
 impl Detector for HiddenCharsDetector {
@@ -79,12 +144,12 @@ impl Detector for HiddenCharsDetector {
             }
         }
 
-        // 2. Homoglyph clusters — walk word-by-word and report mixed-script
-        // Latin words containing Cyrillic / Greek look-alikes.
+        // 2. Homoglyph clusters — walk word-by-word and report Latin words
+        // containing at least one Cyrillic/Greek *Latin-confusable* char.
         let mut word_start: Option<usize> = None;
         let mut latin = 0usize;
-        let mut foreign = 0usize;
-        let mut foreign_kind: Option<&'static str> = None;
+        let mut confusable = 0usize;
+        let mut confusable_kind_seen: Option<&'static str> = None;
 
         let bytes_len = chunk.text.len();
         for (i, c) in chunk.text.char_indices() {
@@ -93,20 +158,14 @@ impl Detector for HiddenCharsDetector {
                 if word_start.is_none() {
                     word_start = Some(i);
                     latin = 0;
-                    foreign = 0;
-                    foreign_kind = None;
+                    confusable = 0;
+                    confusable_kind_seen = None;
                 }
-                match script_of(c) {
-                    Script::Latin => latin += 1,
-                    Script::Cyrillic => {
-                        foreign += 1;
-                        foreign_kind = Some("cyrillic");
-                    }
-                    Script::Greek => {
-                        foreign += 1;
-                        foreign_kind = Some("greek");
-                    }
-                    Script::Other => {}
+                if c.is_ascii_alphabetic() {
+                    latin += 1;
+                } else if let Some(kind) = confusable_kind(c) {
+                    confusable += 1;
+                    confusable_kind_seen = Some(kind);
                 }
             } else if let Some(start) = word_start.take() {
                 emit_homoglyph(
@@ -114,22 +173,21 @@ impl Detector for HiddenCharsDetector {
                     start,
                     i,
                     latin,
-                    foreign,
-                    foreign_kind,
+                    confusable,
+                    confusable_kind_seen,
                     chunk,
                     &mut out,
                 );
             }
         }
-        // Trailing word that ran to end-of-chunk.
         if let Some(start) = word_start {
             emit_homoglyph(
                 &chunk.text,
                 start,
                 bytes_len,
                 latin,
-                foreign,
-                foreign_kind,
+                confusable,
+                confusable_kind_seen,
                 chunk,
                 &mut out,
             );
@@ -145,13 +203,13 @@ fn emit_homoglyph(
     start: usize,
     end: usize,
     latin: usize,
-    foreign: usize,
-    foreign_kind: Option<&'static str>,
+    confusable: usize,
+    confusable_kind_seen: Option<&'static str>,
     chunk: &TextChunk,
     out: &mut Vec<Finding>,
 ) {
-    if latin >= 2 && foreign >= 1 {
-        let kind = foreign_kind.unwrap_or("foreign");
+    if latin >= 2 && confusable >= 1 {
+        let kind = confusable_kind_seen.unwrap_or("foreign");
         let snippet = text.get(start..end).unwrap_or("");
         out.push(Finding {
             detector: "hidden_chars".to_string(),
@@ -160,7 +218,7 @@ fn emit_homoglyph(
             confidence: 0.85,
             path: chunk.path.clone(),
             span: ByteSpan::new(chunk.span.start + start, chunk.span.start + end),
-            message: format!("homoglyph cluster: Latin word with {kind} characters"),
+            message: format!("homoglyph cluster: Latin word with {kind} look-alike character"),
             evidence: Finding::make_evidence(snippet, 60),
         });
     }
@@ -196,30 +254,46 @@ mod tests {
     }
 
     #[test]
-    fn flags_cyrillic_in_latin_word() {
-        // "payload" with Cyrillic 'а' (U+0430) in place of Latin 'a'.
+    fn flags_cyrillic_lookalike_in_latin_word() {
+        // "payload" with Cyrillic 'а' (U+0430, a-lookalike).
         let f = HiddenCharsDetector.analyze(&chunk("the p\u{0430}yload is harmless"));
         assert!(
             f.iter().any(|x| x.message.contains("cyrillic")),
-            "expected cyrillic homoglyph finding, got {f:?}"
+            "expected cyrillic lookalike finding, got {f:?}"
         );
     }
 
     #[test]
-    fn flags_greek_in_latin_word() {
-        // Greek 'ο' (U+03BF) inside a Latin word.
+    fn flags_greek_lookalike_omicron_in_latin_word() {
+        // Greek 'ο' (U+03BF, o-lookalike) inside a Latin word.
         let f = HiddenCharsDetector.analyze(&chunk("the c\u{03BF}mmand runs daily"));
         assert!(f.iter().any(|x| x.message.contains("greek")));
     }
 
     #[test]
-    fn pure_cyrillic_word_is_not_flagged() {
-        // Russian word "привет" — entirely Cyrillic, not a homoglyph attack.
-        let f = HiddenCharsDetector.analyze(&chunk("hello привет world"));
+    fn math_delta_is_not_flagged() {
+        // ΔVol = "change in volatility" — legitimate math notation.
+        // Δ (U+0394) is a triangle, not a Latin lookalike.
+        let f = HiddenCharsDetector.analyze(&chunk("the \u{0394}Vol metric measures change"));
         assert!(
             f.iter().all(|x| !x.message.contains("homoglyph")),
-            "expected no homoglyph finding for pure cyrillic word, got {f:?}"
+            "Δ must not be flagged as a homoglyph, got {f:?}"
         );
+    }
+
+    #[test]
+    fn math_sigma_and_pi_are_not_flagged() {
+        let f = HiddenCharsDetector.analyze(&chunk(
+            "the \u{03A3}(x) summation and \u{03C0}*r\u{00B2} formula",
+        ));
+        assert!(f.iter().all(|x| !x.message.contains("homoglyph")));
+    }
+
+    #[test]
+    fn pure_cyrillic_word_is_not_flagged() {
+        // Russian word "привет" — entirely Cyrillic, not an attack.
+        let f = HiddenCharsDetector.analyze(&chunk("hello \u{043F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442} world"));
+        assert!(f.iter().all(|x| !x.message.contains("homoglyph")));
     }
 
     #[test]

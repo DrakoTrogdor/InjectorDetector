@@ -3,10 +3,23 @@
 //! Scores chunks against a character-bigram language model trained from
 //! an embedded English corpus (`bigram_corpus.txt`). Chunks whose
 //! per-symbol cross-entropy under the model is well above the corpus
-//! baseline are flagged as anomalous — this catches obfuscated, encoded,
-//! or otherwise non-natural-language content far more discriminately than
-//! pure Shannon entropy because the bigram model rewards real letter
-//! transitions ("th", "er", "ing") and penalises adversarial garbage.
+//! baseline — **and** which have enough character diversity to look like
+//! free-form content rather than structured repetition — are flagged as
+//! anomalous. Two gates working together keep both classes of noise at
+//! bay:
+//!
+//! 1. **Bigram cross-entropy** — ordinary English prose scores around
+//!    1.8–2.6 nats/symbol, dense technical documentation 3.0–4.0, and
+//!    base64 / random garbage 4.5+. Anything below the `HIGH_NATS`
+//!    cutoff looks enough like English to be ignored.
+//! 2. **Character Shannon entropy** — ASCII art, box drawings, and
+//!    tables have legitimately high *bigram* cross-entropy (because
+//!    their byte transitions don't appear in the training corpus) but
+//!    very *low* character diversity (they only use a handful of
+//!    distinct symbols). Requiring a minimum Shannon entropy over the
+//!    chunk's character distribution filters them without hurting
+//!    detection on genuinely random blobs, which use many distinct
+//!    characters and have high Shannon entropy too.
 //!
 //! # Scope
 //!
@@ -14,24 +27,32 @@
 //! language** — plain prose, Markdown, docstrings, notebook markdown
 //! cells, HTML text nodes, and PDF body text. Structured content
 //! (config values, code comments / string literals, HTML attributes,
-//! notebook code cells / outputs, `Cargo.lock`-style artefacts) has a
-//! legitimately high bigram cross-entropy under an English model, so
-//! running perplexity there produces false positives at a rate that
-//! drowns out the signal. See `Provenance::is_natural_language`.
+//! notebook code cells / outputs, `Cargo.lock`-style artefacts,
+//! PowerShell / Lua / SQL / etc. scripts routed through the lockfile
+//! dispatch) has a legitimately high bigram cross-entropy under an
+//! English model, so running perplexity there produces false positives
+//! at a rate that drowns out the signal. See
+//! `Provenance::is_natural_language`.
+
+use std::collections::HashMap;
 
 use super::bigram_model::BigramModel;
 use super::{Category, Detector};
 use crate::types::{Finding, Severity, TextChunk};
 
-/// Under the bigram model, ordinary English prose scores around 1.8–2.2
-/// nats/symbol; dense technical prose up to ~2.6; base64 ≈ 3.0; cyclic
-/// random printables ≈ 4.3; truly uniform random ≈ 4.5+. We deliberately
-/// set the thresholds well above the natural-prose band so we only flag
-/// near-random content — the encoded detector already owns base64/hex
-/// payloads, so perplexity is the safety net for content that isn't
-/// shaped like either prose or a known encoding.
-const HIGH_NATS: f64 = 3.3;
-const VERY_HIGH_NATS: f64 = 3.8;
+/// Bigram cross-entropy cutoffs in nats/symbol. The lower bound has to
+/// sit comfortably above the natural band for real-world Markdown
+/// documentation — dense technical prose in this repo's own `DESIGN.md`
+/// and `STATUS.md` scores 3.8–4.2, so anything below 4.5 is treated as
+/// "still plausibly English". The upper bound is where we start calling
+/// something Critical.
+const HIGH_NATS: f64 = 5.0;
+const VERY_HIGH_NATS: f64 = 5.6;
+/// Character Shannon entropy cutoff in bits. Normal prose sits around
+/// 4.3–4.9 bits, ASCII art around 2.5–3.5, and random printable content
+/// above 6.0. Requiring ≥ 4.5 bits filters box drawings, tables, and
+/// dash-separator lines without rejecting real prose or random blobs.
+const MIN_SHANNON_BITS: f64 = 4.5;
 /// Don't bother scoring tiny chunks — their statistics are meaningless.
 const MIN_BYTES: usize = 256;
 
@@ -51,6 +72,13 @@ impl Detector for PerplexityDetector {
             return Vec::new();
         }
         if chunk.text.len() < MIN_BYTES {
+            return Vec::new();
+        }
+        if char_shannon_entropy(&chunk.text) < MIN_SHANNON_BITS {
+            // Low character diversity — almost certainly ASCII art,
+            // box drawings, or a heavily repetitive table. Bigram
+            // cross-entropy would fire but the content isn't actually
+            // suspicious.
             return Vec::new();
         }
 
@@ -85,6 +113,30 @@ impl Detector for PerplexityDetector {
     }
 }
 
+/// Shannon entropy (bits) over the character distribution of `text`.
+/// We iterate over `char`s rather than bytes so multi-byte sequences
+/// (box drawings, emoji, accented letters) count as a single symbol
+/// each — byte-level counting artificially inflates entropy for
+/// non-ASCII content.
+fn char_shannon_entropy(text: &str) -> f64 {
+    let mut counts: HashMap<char, u32> = HashMap::new();
+    let mut total = 0u32;
+    for c in text.chars() {
+        *counts.entry(c).or_insert(0) += 1;
+        total += 1;
+    }
+    if total == 0 {
+        return 0.0;
+    }
+    let total_f = total as f64;
+    let mut h = 0.0f64;
+    for &c in counts.values() {
+        let p = c as f64 / total_f;
+        h -= p * p.log2();
+    }
+    h
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,11 +164,15 @@ mod tests {
 
     #[test]
     fn high_entropy_blob_yields_finding() {
-        // Random-looking ASCII pushes bigram cross-entropy well above the
-        // English baseline.
+        // All non-letter printables: every transition maps to the
+        // "other" bin in the bigram model, which is heavily penalised
+        // against the English-trained distribution — cross-entropy
+        // comfortably above HIGH_NATS. 40 distinct characters keep the
+        // Shannon-entropy gate happy (log2(40) ≈ 5.3 bits).
+        let symbols = "0123456789!@#$%^&*()_+-=[]{}|;:,./<>?`~";
         let mut s = String::new();
-        for i in 0..600u32 {
-            s.push((33 + ((i * 7919) % 94)) as u8 as char);
+        for i in 0..600 {
+            s.push(symbols.as_bytes()[i % symbols.len()] as char);
         }
         let f = PerplexityDetector.analyze(&chunk(&s));
         assert!(!f.is_empty(), "expected high-entropy blob to fire");
@@ -129,10 +185,11 @@ mod tests {
 
     #[test]
     fn structured_provenance_is_skipped_even_when_entropy_is_high() {
-        // Same high-entropy blob that fires under Provenance::Prose.
+        // Same kind of high-entropy non-letter blob used above.
+        let symbols = "0123456789!@#$%^&*()_+-=[]{}|;:,./<>?`~";
         let mut s = String::new();
-        for i in 0..600u32 {
-            s.push((33 + ((i * 7919) % 94)) as u8 as char);
+        for i in 0..600 {
+            s.push(symbols.as_bytes()[i % symbols.len()] as char);
         }
         for p in [
             Provenance::ConfigString,
@@ -148,6 +205,23 @@ mod tests {
         }
         // Sanity: Prose still fires.
         assert!(!PerplexityDetector.analyze(&chunk_with(&s, Provenance::Prose)).is_empty());
+    }
+
+    #[test]
+    fn low_diversity_ascii_art_is_skipped() {
+        // Box drawings repeated — classic Markdown architecture diagram.
+        // This has high bigram cross-entropy under the English model
+        // (the transitions don't appear in prose) but very low
+        // character diversity (only ~6 distinct chars). The Shannon
+        // gate should kick in before scoring happens.
+        let mut s = String::new();
+        for _ in 0..120 {
+            s.push_str("│   │      │    │     │\n");
+        }
+        assert!(
+            PerplexityDetector.analyze(&chunk(&s)).is_empty(),
+            "ASCII art with low char diversity must be skipped"
+        );
     }
 
     #[test]

@@ -56,8 +56,11 @@ rule system_prompt_spoof {
     strings:
         $a = "system prompt:" nocase
         $b = "system message:" nocase
-        $c = "system:" ascii
-        $d = "[system]" nocase
+        $c = "[system]" nocase
+        // Note: we deliberately do not match the bare literal "system:"
+        // because ordinary English ("priority system:", "operating system:",
+        // "module system:") contains it constantly. The more specific
+        // variants above plus the ChatML rule cover real spoof attempts.
     condition:
         any of them
 }
