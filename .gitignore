@@ -1,0 +1,43 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+*.pdb
+
+# Cargo
+# Keep Cargo.lock for binaries (this is a binary crate), so it is NOT ignored.
+
+# IDE / editor
+/.idea/
+/.vscode/
+/.claude/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS
+desktop.ini
+
+# Logs / temp
+*.log
+*.tmp
+/tmp/
+/scratch/
+
+# InjectorDetector runtime artifacts
+/reports/
+*.sarif.tmp
+/.injector-detector-cache/
+
+# Local config overrides
+/config.local.toml
+.env
+.env.*
+!.env.example
+
+# Large bundled assets that should not be committed by accident
+/models/*.onnx
+/models/*.bin
+!/models/.gitkeep

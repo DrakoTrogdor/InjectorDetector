@@ -1,0 +1,65 @@
+//! InjectorDetector — static prompt-injection scanner for Git repositories.
+//!
+//! See `DESIGN.md` at the repo root for the architecture this crate
+//! implements.
+
+pub mod aggregate;
+pub mod chunk;
+pub mod config;
+pub mod detect;
+pub mod extract;
+pub mod report;
+pub mod repo;
+pub mod types;
+pub mod walk;
+
+use anyhow::Result;
+use rayon::prelude::*;
+
+use crate::aggregate::Aggregator;
+use crate::config::ScanConfig;
+use crate::detect::Engine;
+use crate::report::ScanReport;
+use crate::types::Severity;
+
+/// Run a full scan against the given repository source.
+pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
+    let loaded = repo::load(source, config)?;
+    let engine = Engine::from_config(&config.detectors);
+
+    // Collect entries up front so we can fan them out across rayon. The
+    // walker itself is single-threaded; per-file work parallelises well.
+    let entries: Vec<_> = walk::walk(&loaded, config)?.collect::<Result<Vec<_>>>()?;
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(config.jobs.max(1))
+        .build()
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    let findings: Vec<_> = pool.install(|| {
+        entries
+            .par_iter()
+            .flat_map_iter(|entry| {
+                let chunks = extract::extract(entry).unwrap_or_default();
+                chunks
+                    .into_iter()
+                    .flat_map(|chunk| engine.analyze(&chunk))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    });
+
+    let mut aggregator = Aggregator::new();
+    for f in findings {
+        aggregator.add(f);
+    }
+    Ok(aggregator.finalize(config))
+}
+
+/// Returns `true` if the report's worst severity meets or exceeds `fail_on`.
+pub fn is_unsafe(report: &ScanReport, fail_on: Severity) -> bool {
+    report
+        .max_severity()
+        .map(|s| s >= fail_on)
+        .unwrap_or(false)
+}

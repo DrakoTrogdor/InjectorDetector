@@ -1,0 +1,2 @@
+This line looks normal but contains a zero-width space:​right here.
+This line contains a bidi override: ‮reversed text follows.

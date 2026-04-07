@@ -1,0 +1,2 @@
+Some debug log output that accidentally captured a prompt canary token:
+[CANARY:12345678-1234-1234-1234-123456789abc]
