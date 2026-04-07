@@ -27,6 +27,9 @@ pub struct ScanConfig {
     /// When true, the scan appends new findings to `ignore_file` instead
     /// of returning NOT SAFE.
     pub quarantine: bool,
+    /// Suppress command-line progress output (and any non-error stderr
+    /// chatter).
+    pub quiet: bool,
     pub max_binary_bytes: u64,
     pub max_chunk_bytes: usize,
     pub chunk_overlap_bytes: usize,
@@ -97,6 +100,7 @@ impl Default for ScanConfig {
             since: None,
             ignore_file: PathBuf::from(".injector-detector-ignore"),
             quarantine: false,
+            quiet: false,
             max_binary_bytes: 1024 * 1024,
             max_chunk_bytes: 2048,
             chunk_overlap_bytes: 256,

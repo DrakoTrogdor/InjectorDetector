@@ -8,6 +8,7 @@ pub mod chunk;
 pub mod config;
 pub mod detect;
 pub mod extract;
+pub mod progress;
 pub mod quarantine;
 pub mod report;
 pub mod repo;
@@ -20,11 +21,15 @@ use rayon::prelude::*;
 use crate::aggregate::Aggregator;
 use crate::config::ScanConfig;
 use crate::detect::Engine;
+use crate::progress::ProgressReporter;
 use crate::report::ScanReport;
 use crate::types::Severity;
 
 /// Run a full scan against the given repository source.
 pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
+    let progress = ProgressReporter::new(config.quiet);
+
+    progress.stage("Loading repository");
     let loaded = repo::load(source, config)?;
     let engine = Engine::from_config(&config.detectors);
 
@@ -36,8 +41,9 @@ pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
     };
     let mut quarantine_file = quarantine::load(&ignore_path).unwrap_or_default();
 
-    // Collect entries up front so we can fan them out across rayon.
+    progress.stage("Walking files");
     let entries: Vec<_> = walk::walk(&loaded, config)?.collect::<Result<Vec<_>>>()?;
+    progress.begin_scanning(entries.len() as u64);
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(config.jobs.max(1))
@@ -48,26 +54,30 @@ pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
         entries
             .par_iter()
             .flat_map_iter(|entry| {
+                progress.on_file(&entry.path);
                 let chunks = extract::extract(entry).unwrap_or_default();
-                chunks
+                let result: Vec<_> = chunks
                     .into_iter()
                     .flat_map(|chunk| engine.analyze(&chunk))
-                    .collect::<Vec<_>>()
+                    .collect();
+                progress.inc_file();
+                result
             })
             .collect()
     });
 
+    progress.stage("Aggregating findings");
     if config.quarantine {
         // In quarantine mode, append every new finding to the ignore file
         // and then drop them so the report comes back SAFE. The user is
         // expected to `git add` the ignore file and review it.
         quarantine::append_findings(&mut quarantine_file, &findings);
         quarantine::save(&ignore_path, &quarantine_file)?;
-        tracing::info!(
-            path = %ignore_path.display(),
-            count = findings.len(),
-            "quarantined findings"
-        );
+        progress.println(format!(
+            "quarantined {} finding(s) → {}",
+            findings.len(),
+            ignore_path.display()
+        ));
         findings.clear();
     } else {
         quarantine::filter_findings(&mut findings, &quarantine_file);
@@ -77,7 +87,15 @@ pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
     for f in findings {
         aggregator.add(f);
     }
-    Ok(aggregator.finalize(config))
+    let report = aggregator.finalize(config);
+
+    progress.finish(&format!(
+        "Scanned {} file(s) — verdict: {}",
+        entries.len(),
+        report.verdict.label()
+    ));
+
+    Ok(report)
 }
 
 /// Returns `true` if the report's worst severity meets or exceeds `fail_on`.

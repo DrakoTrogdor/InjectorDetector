@@ -16,10 +16,11 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] Initial commit
 
 ### CLI
-- [x] `clap`-based CLI with positional `REPO`, `--rev`, `--config`, `--format`, `--fail-on`, `--include`, `--exclude`, `--no-clone`, `--keep`, **`--since`**, **`--quarantine`**, **`--ignore-file`**, `--jobs`
+- [x] `clap`-based CLI with positional `REPO`, `--rev`, `--config`, `--format`, `--fail-on`, `--include`, `--exclude`, `--no-clone`, `--keep`, `--since`, `--quarantine`, `--ignore-file`, **`-q` / `--quiet`**, `--jobs`
 - [x] Exit codes: `0` SAFE, `1` NOT SAFE, `2` scan error
 - [x] `tracing` / `tracing-subscriber` initialised with `RUST_LOG` env filter
 - [x] Walker emits `tracing::warn!` when `--rev` is silently dropped during the working-tree fallback
+- [x] **`indicatif` progress bar on stderr** showing pipeline stage (load / walk / scan / aggregate), per-file ticks with the current path, elapsed time, and a final verdict summary. Auto-disables under `--quiet` or when stderr is not a TTY (so redirected output stays clean).
 
 ### Repo loader (`src/repo.rs`)
 - [x] Local path open via `gix`

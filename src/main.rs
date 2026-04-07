@@ -90,6 +90,10 @@ struct Cli {
     #[arg(long, default_value = ".injector-detector-ignore")]
     ignore_file: std::path::PathBuf,
 
+    /// Suppress the progress bar and any non-error stderr output.
+    #[arg(short, long)]
+    quiet: bool,
+
     /// Worker thread count.
     #[arg(long)]
     jobs: Option<usize>,
@@ -125,6 +129,7 @@ fn run() -> Result<ExitCode> {
     config.since = cli.since;
     config.quarantine = cli.quarantine;
     config.ignore_file = cli.ignore_file;
+    config.quiet = cli.quiet;
     if let Some(j) = cli.jobs {
         config.jobs = j;
     }
