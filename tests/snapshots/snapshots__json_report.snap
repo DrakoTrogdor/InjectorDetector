@@ -1,0 +1,41 @@
+---
+source: tests/snapshots.rs
+expression: json
+---
+{
+  "files": [
+    {
+      "path": "src/foo.md",
+      "findings": [
+        {
+          "detector": "heuristic",
+          "severity": "critical",
+          "confidence": 0.95,
+          "path": "src/foo.md",
+          "span": {
+            "start": 10,
+            "end": 22
+          },
+          "message": "ChatML role-hijack token (chatml_role_hijack)",
+          "evidence": "<|im_start|>"
+        },
+        {
+          "detector": "hidden_chars",
+          "severity": "medium",
+          "confidence": 0.95,
+          "path": "src/foo.md",
+          "span": {
+            "start": 40,
+            "end": 43
+          },
+          "message": "hidden zero-width U+200B",
+          "evidence": "U+200B"
+        }
+      ],
+      "max_severity": "critical",
+      "score": 17.5
+    }
+  ],
+  "max_severity": "critical",
+  "verdict": "not_safe"
+}

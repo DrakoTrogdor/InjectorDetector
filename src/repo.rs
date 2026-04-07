@@ -15,6 +15,9 @@ use crate::config::ScanConfig;
 pub struct LoadedRepo {
     pub root: PathBuf,
     pub rev: String,
+    /// True if the user passed `--rev` (so the walker should warn if it
+    /// can't honor it instead of silently dropping the request).
+    pub rev_explicit: bool,
     _tempdir: Option<tempfile::TempDir>,
 }
 
@@ -62,6 +65,7 @@ fn open_local(path: &Path, config: &ScanConfig) -> Result<LoadedRepo> {
     Ok(LoadedRepo {
         root: canonical,
         rev: config.rev.clone(),
+        rev_explicit: config.rev != "HEAD",
         _tempdir: None,
     })
 }
@@ -86,9 +90,22 @@ fn clone_remote(url: &str, config: &ScanConfig) -> Result<LoadedRepo> {
         .main_worktree(gix::progress::Discard, &interrupt)
         .with_context(|| format!("failed to checkout worktree for {url}"))?;
 
+    // If --keep was set, we leak the tempdir handle so that its destructor
+    // doesn't remove the directory on drop. The path is logged so the
+    // user can find it after the scan finishes.
+    let tempdir_handle = if config.keep {
+        let path = tempdir.path().to_path_buf();
+        std::mem::forget(tempdir);
+        tracing::info!(path = %path.display(), "--keep set; cloned repo preserved on disk");
+        None
+    } else {
+        Some(tempdir)
+    };
+
     Ok(LoadedRepo {
         root: target,
         rev: config.rev.clone(),
-        _tempdir: Some(tempdir),
+        rev_explicit: config.rev != "HEAD",
+        _tempdir: tempdir_handle,
     })
 }

@@ -34,9 +34,22 @@ pub fn walk(repo: &LoadedRepo, config: &ScanConfig) -> Result<Box<dyn Iterator<I
         match walk_git_tree(git, &repo.rev, include.clone(), exclude.clone(), max_bytes) {
             Ok(entries) => return Ok(Box::new(entries.into_iter().map(Ok))),
             Err(e) => {
-                tracing::warn!(error = %e, "git tree walk failed; falling back to working tree");
+                if repo.rev_explicit {
+                    tracing::warn!(
+                        rev = %repo.rev,
+                        error = %e,
+                        "git tree walk failed; --rev will be ignored and the working tree scanned instead"
+                    );
+                } else {
+                    tracing::debug!(error = %e, "git tree walk failed; falling back to working tree");
+                }
             }
         }
+    } else if repo.rev_explicit {
+        tracing::warn!(
+            rev = %repo.rev,
+            "target is not a git repository; --rev will be ignored and the working tree scanned instead"
+        );
     }
 
     Ok(Box::new(walk_working_tree(

@@ -65,6 +65,46 @@ fn go_spec() -> LangSpec {
     }
 }
 
+fn java_spec() -> LangSpec {
+    LangSpec {
+        language: || tree_sitter_java::LANGUAGE.into(),
+        comment_kinds: &["line_comment", "block_comment"],
+        string_kinds: &["string_literal", "character_literal"],
+    }
+}
+
+fn c_spec() -> LangSpec {
+    LangSpec {
+        language: || tree_sitter_c::LANGUAGE.into(),
+        comment_kinds: &["comment"],
+        string_kinds: &["string_literal", "char_literal"],
+    }
+}
+
+fn cpp_spec() -> LangSpec {
+    LangSpec {
+        language: || tree_sitter_cpp::LANGUAGE.into(),
+        comment_kinds: &["comment"],
+        string_kinds: &["string_literal", "raw_string_literal", "char_literal"],
+    }
+}
+
+fn bash_spec() -> LangSpec {
+    LangSpec {
+        language: || tree_sitter_bash::LANGUAGE.into(),
+        comment_kinds: &["comment"],
+        string_kinds: &["string", "raw_string", "ansi_c_string", "heredoc_body"],
+    }
+}
+
+fn ruby_spec() -> LangSpec {
+    LangSpec {
+        language: || tree_sitter_ruby::LANGUAGE.into(),
+        comment_kinds: &["comment"],
+        string_kinds: &["string", "string_content", "heredoc_body"],
+    }
+}
+
 fn spec_for_extension(ext: &str) -> Option<LangSpec> {
     match ext {
         "rs" => Some(rust_spec()),
@@ -73,6 +113,11 @@ fn spec_for_extension(ext: &str) -> Option<LangSpec> {
         "ts" | "mts" | "cts" => Some(typescript_spec()),
         "tsx" => Some(tsx_spec()),
         "go" => Some(go_spec()),
+        "java" => Some(java_spec()),
+        "c" | "h" => Some(c_spec()),
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => Some(cpp_spec()),
+        "sh" | "bash" | "zsh" => Some(bash_spec()),
+        "rb" | "rake" | "gemspec" => Some(ruby_spec()),
         _ => None,
     }
 }

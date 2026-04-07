@@ -1,0 +1,95 @@
+---
+source: tests/snapshots.rs
+expression: redacted
+---
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "InjectorDetector",
+          "informationUri": "https://github.com/anthropics/injector-detector",
+          "version": "<version>",
+          "rules": [
+            {
+              "id": "heuristic",
+              "name": "heuristic",
+              "shortDescription": {
+                "text": "InjectorDetector heuristic detector"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "hidden_chars",
+              "name": "hidden_chars",
+              "shortDescription": {
+                "text": "InjectorDetector hidden_chars detector"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "heuristic",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "ChatML role-hijack token (chatml_role_hijack)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/foo.md"
+                },
+                "region": {
+                  "byteOffset": 10,
+                  "byteLength": 12
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": 0.949999988079071,
+            "severity": "critical",
+            "evidence": "<|im_start|>"
+          }
+        },
+        {
+          "ruleId": "hidden_chars",
+          "ruleIndex": 1,
+          "level": "warning",
+          "message": {
+            "text": "hidden zero-width U+200B"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/foo.md"
+                },
+                "region": {
+                  "byteOffset": 40,
+                  "byteLength": 3
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": 0.949999988079071,
+            "severity": "medium",
+            "evidence": "U+200B"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -70,6 +70,11 @@ struct Cli {
     #[arg(long)]
     no_clone: bool,
 
+    /// Preserve cloned tempdirs on disk after the scan completes.
+    /// The path is printed via tracing.
+    #[arg(long)]
+    keep: bool,
+
     /// Worker thread count.
     #[arg(long)]
     jobs: Option<usize>,
@@ -101,6 +106,7 @@ fn run() -> Result<ExitCode> {
     config.include = cli.include;
     config.exclude = cli.exclude;
     config.no_clone = cli.no_clone;
+    config.keep = cli.keep;
     if let Some(j) = cli.jobs {
         config.jobs = j;
     }
