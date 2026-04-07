@@ -28,6 +28,7 @@ use crate::types::Severity;
 /// Run a full scan against the given repository source.
 pub fn scan(source: &str, config: &ScanConfig) -> Result<ScanReport> {
     let progress = ProgressReporter::new(config.quiet);
+    progress.checking(source);
 
     progress.stage("Loading repository");
     let loaded = repo::load(source, config)?;
