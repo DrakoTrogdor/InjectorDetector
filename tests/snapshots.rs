@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 
+use injector_detector::detect::Category;
 use injector_detector::report::{FileReport, ScanReport, Verdict};
 use injector_detector::types::{ByteSpan, Finding, Severity};
 
@@ -12,6 +13,7 @@ fn fixture_report() -> ScanReport {
     let findings = vec![
         Finding {
             detector: "heuristic".to_string(),
+            category: Category::Heuristic,
             severity: Severity::Critical,
             confidence: 0.95,
             path: PathBuf::from("src/foo.md"),
@@ -21,6 +23,7 @@ fn fixture_report() -> ScanReport {
         },
         Finding {
             detector: "hidden_chars".to_string(),
+            category: Category::HiddenChars,
             severity: Severity::Medium,
             confidence: 0.95,
             path: PathBuf::from("src/foo.md"),

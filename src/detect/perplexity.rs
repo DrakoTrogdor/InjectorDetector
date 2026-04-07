@@ -53,6 +53,7 @@ impl Detector for PerplexityDetector {
 
         vec![Finding {
             detector: "perplexity".to_string(),
+            category: Category::Perplexity,
             severity,
             confidence,
             path: chunk.path.clone(),

@@ -11,6 +11,8 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `README.md` — install, usage, CI snippet, configuration
 - [x] `LICENSE` — MIT
 - [x] `.gitignore` — Rust, IDE, OS, project caches, local config, large model artifacts
+- [x] `action.yml` — GitHub Action composite wrapper with cached binary install
+- [x] `.pre-commit-hooks.yaml` — pre-commit integration (default + strict hooks)
 - [x] Initial commit
 
 ### CLI
@@ -54,7 +56,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **`encoded`** — base64 / hex / URL-encoded recursive decode + needle re-scan
 - [x] **`canary`** — Rebuff-style `[CANARY:<uuid>]` regex + user-supplied tokens
 - [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`
-- [x] **`embedding`** — 64-bit SimHash over normalised tokens vs ~30 canonical injection payloads; accepts an ONNX `model_path` for forward compatibility
+- [x] **`embedding`** — 64-bit SimHash over normalised tokens vs ~30 canonical injection payloads; **real ONNX backend via `ort` 2.0.0-rc.10 behind the `embeddings` feature**, loading a user-supplied sentence-transformer model and matching by cosine similarity with mean-pooling over the token axis
 
 ### Bundled assets
 - [x] `rules/builtin.yar` — 9 YARA rules with severity / confidence / message metadata
@@ -71,6 +73,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] `human` — coloured terminal output, grouped by file
 - [x] `json` — `serde_json` pretty
 - [x] `sarif` — real SARIF 2.1.0 with rules, results, byte-offset regions, severity-mapped levels
+- [x] `Category` exposed via SARIF `properties.category` and JSON `category` field on each finding
 
 ### Configuration (`src/config.rs`)
 - [x] `ScanConfig` defaults
@@ -98,18 +101,10 @@ Update this file alongside the change that completes (or adds) an item.
 
 _(nothing currently in progress)_
 
-## Planned — short term
-
-### Polish / loose ends
-- [ ] **#14 `Category` enum is unused** — variants exist but no caller reads them. Either thread `category()` into the report output or `#[allow(dead_code)]` and document why.
-
-### CI / packaging
-- [ ] **#12 GitHub Action wrapper** — `action.yml` that wraps `injector-detector` for marketplace use; the README already shows the snippet.
-- [ ] **#12 Pre-commit hook** — `.pre-commit-hooks.yaml` so users can drop the scanner into [pre-commit](https://pre-commit.com/).
-
 ## Planned — medium term
 
-- [ ] **#13 Real ONNX embedding backend** — wire `ort` once a stable release ships. The corpus, config plumbing (`embedding_model: Option<PathBuf>`), trait shape, and SimHash fallback are all in place; only the inference path is stubbed. Last attempted on `ort` 2.0.0-rc.4 / rc.9 / rc.12 — every RC currently has build issues against its matching `ort-sys`.
+- [ ] **Bundle a default ONNX model** — the ONNX backend currently requires the user to point at their own model via `[detectors.embedding] model = "..."`. Shipping a small quantised sentence-transformer (e.g. `all-MiniLM-L6-v2`) would make the backend usable out of the box.
+- [ ] **Real tokenizer for the ONNX backend** — the current path uses a placeholder whitespace tokeniser (ids = 1..=N). A bundled model should be paired with its original HuggingFace tokenizer (via the `tokenizers` crate) for accurate embeddings.
 - [ ] **Live LLM-based classifier detector** — DESIGN.md §11. Would let the tool consult a hosted or local model at scan time; default off, opt-in.
 - [ ] **Incremental scan mode** — only re-evaluate files changed since a base ref (DESIGN.md §11).
 - [ ] **Auto-quarantine review queue** — write a `.injector-detector-ignore` file for review instead of failing the build outright (DESIGN.md §11).

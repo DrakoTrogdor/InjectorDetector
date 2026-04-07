@@ -87,6 +87,7 @@ impl Detector for HeuristicDetector {
                         chunk.text.get(r.start..r.end).unwrap_or("");
                     out.push(Finding {
                         detector: "heuristic".to_string(),
+                        category: Category::Heuristic,
                         severity,
                         confidence,
                         path: chunk.path.clone(),
@@ -102,6 +103,7 @@ impl Detector for HeuristicDetector {
                 // Emit a single rule-level finding so the user still sees it.
                 out.push(Finding {
                     detector: "heuristic".to_string(),
+                    category: Category::Heuristic,
                     severity,
                     confidence,
                     path: chunk.path.clone(),

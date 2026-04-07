@@ -1,0 +1,117 @@
+name: 'InjectorDetector'
+description: 'Static prompt-injection scanner for Git repositories. Returns SAFE or NOT SAFE based on detector findings.'
+author: 'InjectorDetector contributors'
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  path:
+    description: 'Path to scan (relative to the workspace).'
+    required: false
+    default: '.'
+  rev:
+    description: 'Git revision to scan. Defaults to HEAD.'
+    required: false
+    default: 'HEAD'
+  fail-on:
+    description: 'Minimum severity that fails the scan: low | medium | high | critical.'
+    required: false
+    default: 'medium'
+  format:
+    description: 'Output format: human | json | sarif.'
+    required: false
+    default: 'human'
+  output-file:
+    description: 'Optional path to write the report to in addition to stdout.'
+    required: false
+    default: ''
+  include:
+    description: 'Space-separated glob(s) restricting which paths are scanned.'
+    required: false
+    default: ''
+  exclude:
+    description: 'Space-separated glob(s) skipping matching paths.'
+    required: false
+    default: ''
+  config:
+    description: 'Optional TOML config file path.'
+    required: false
+    default: ''
+  version:
+    description: 'Git ref to install from (branch, tag, or commit on this repository).'
+    required: false
+    default: 'main'
+
+outputs:
+  verdict:
+    description: 'Either "safe" or "not_safe".'
+    value: ${{ steps.scan.outputs.verdict }}
+  report-path:
+    description: 'Path to the written report file (only set if output-file was supplied).'
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Ensure Rust toolchain is available
+      shell: bash
+      run: |
+        if ! command -v cargo >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Cache injector-detector binary
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/injector-detector
+        key: injector-detector-${{ runner.os }}-${{ inputs.version }}
+
+    - name: Install injector-detector
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        cargo install \
+          --git https://github.com/DrakoTrogdor/InjectorDetector \
+          --branch "${{ inputs.version }}" \
+          --locked \
+          injector-detector
+
+    - name: Run scan
+      id: scan
+      shell: bash
+      run: |
+        set +e
+        args=("${{ inputs.path }}" \
+              --rev "${{ inputs.rev }}" \
+              --format "${{ inputs.format }}" \
+              --fail-on "${{ inputs.fail-on }}")
+
+        if [ -n "${{ inputs.config }}" ]; then
+          args+=(--config "${{ inputs.config }}")
+        fi
+        for g in ${{ inputs.include }}; do
+          args+=(--include "$g")
+        done
+        for g in ${{ inputs.exclude }}; do
+          args+=(--exclude "$g")
+        done
+
+        if [ -n "${{ inputs.output-file }}" ]; then
+          injector-detector "${args[@]}" | tee "${{ inputs.output-file }}"
+          rc=${PIPESTATUS[0]}
+          echo "report-path=${{ inputs.output-file }}" >> "$GITHUB_OUTPUT"
+        else
+          injector-detector "${args[@]}"
+          rc=$?
+        fi
+
+        case "$rc" in
+          0) echo "verdict=safe"     >> "$GITHUB_OUTPUT" ;;
+          1) echo "verdict=not_safe" >> "$GITHUB_OUTPUT" ;;
+          *) echo "::error::injector-detector exited with code $rc" ; exit "$rc" ;;
+        esac
+        exit "$rc"

@@ -58,6 +58,7 @@ expression: redacted
             }
           ],
           "properties": {
+            "category": "heuristic",
             "confidence": 0.949999988079071,
             "severity": "critical",
             "evidence": "<|im_start|>"
@@ -84,6 +85,7 @@ expression: redacted
             }
           ],
           "properties": {
+            "category": "hidden_chars",
             "confidence": 0.949999988079071,
             "severity": "medium",
             "evidence": "U+200B"

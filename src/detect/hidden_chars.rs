@@ -68,6 +68,7 @@ impl Detector for HiddenCharsDetector {
                 };
                 out.push(Finding {
                     detector: "hidden_chars".to_string(),
+                    category: Category::HiddenChars,
                     severity,
                     confidence: 0.95,
                     path: chunk.path.clone(),
@@ -154,6 +155,7 @@ fn emit_homoglyph(
         let snippet = text.get(start..end).unwrap_or("");
         out.push(Finding {
             detector: "hidden_chars".to_string(),
+            category: Category::HiddenChars,
             severity: Severity::High,
             confidence: 0.85,
             path: chunk.path.clone(),

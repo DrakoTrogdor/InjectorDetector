@@ -102,6 +102,7 @@ mod tests {
     fn finding(detector: &str, severity: Severity, confidence: f32, start: usize) -> Finding {
         Finding {
             detector: detector.to_string(),
+            category: crate::detect::Category::Heuristic,
             severity,
             confidence,
             path: PathBuf::from("t.txt"),

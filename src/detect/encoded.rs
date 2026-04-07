@@ -127,6 +127,7 @@ impl Detector for EncodedDetector {
                     let abs_end = chunk.span.start + m.end();
                     out.push(Finding {
                         detector: "encoded".to_string(),
+                        category: Category::Encoded,
                         severity: Severity::Critical,
                         confidence: 0.9,
                         path: chunk.path.clone(),

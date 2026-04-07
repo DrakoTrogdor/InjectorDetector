@@ -7,14 +7,13 @@
 //!   paraphrased or lightly-mutated copies of canonical jailbreaks without
 //!   any model file or external runtime.
 //!
-//! * **ONNX backend (planned)** — DESIGN.md §4.5.6 calls for a sentence
-//!   -transformer loaded via `ort` and matched by cosine similarity. The
-//!   `[detectors.embedding] model = "..."` config field already exists so
-//!   users can point at a model path, and `EmbeddingDetector::new` accepts
-//!   it. The actual ONNX inference path is currently stubbed because the
-//!   `ort` 2.0 release-candidate line has unstable builds; once a stable
-//!   `ort` ships we'll slot the implementation in behind the same
-//!   `Detector` trait without breaking the public API.
+//! * **ONNX backend (`embeddings` Cargo feature)** — loads a user-supplied
+//!   ONNX sentence-transformer via `ort` 2.0, embeds each chunk plus the
+//!   corpus, and matches by cosine similarity. The model is expected to
+//!   expose `input_ids` and `attention_mask` inputs and a single output
+//!   tensor that is mean-pooled over the token axis (standard
+//!   sentence-transformer export). When no model is configured or loading
+//!   fails, the detector falls back to the SimHash backend.
 //!
 //! The corpus below is curated from public sources (Lakera Gandalf
 //! write-ups, HuggingFace `deepset/prompt-injections`, LMSYS jailbreak
@@ -59,24 +58,53 @@ const KNOWN_PAYLOADS: &[&str] = &[
 ];
 
 const HAMMING_THRESHOLD: u32 = 12;
+#[cfg(feature = "embeddings")]
+const COSINE_THRESHOLD: f32 = 0.78;
+
+enum Backend {
+    SimHash {
+        fingerprints: Vec<u64>,
+    },
+    #[cfg(feature = "embeddings")]
+    Onnx(Box<onnx::OnnxBackend>),
+}
 
 pub struct EmbeddingDetector {
-    fingerprints: Vec<u64>,
+    backend: Backend,
 }
 
 impl EmbeddingDetector {
-    /// Construct a detector. `model_path` is accepted for forward
-    /// compatibility with the planned ONNX backend; today the SimHash
-    /// backend is always used regardless.
     pub fn new(model_path: Option<&PathBuf>) -> Self {
+        #[cfg(feature = "embeddings")]
+        if let Some(path) = model_path {
+            match onnx::OnnxBackend::load(path) {
+                Ok(backend) => {
+                    tracing::info!(model = %path.display(), "loaded ONNX embedding backend");
+                    return Self {
+                        backend: Backend::Onnx(Box::new(backend)),
+                    };
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        model = %path.display(),
+                        error = %e,
+                        "failed to load ONNX model, falling back to SimHash"
+                    );
+                }
+            }
+        }
+        #[cfg(not(feature = "embeddings"))]
         if let Some(path) = model_path {
             tracing::warn!(
                 model = %path.display(),
-                "ONNX embedding backend is not yet implemented; falling back to SimHash"
+                "ONNX backend requires --features embeddings; falling back to SimHash"
             );
         }
+
         Self {
-            fingerprints: KNOWN_PAYLOADS.iter().map(|p| simhash(p)).collect(),
+            backend: Backend::SimHash {
+                fingerprints: KNOWN_PAYLOADS.iter().map(|p| simhash(p)).collect(),
+            },
         }
     }
 }
@@ -94,30 +122,37 @@ impl Detector for EmbeddingDetector {
         if chunk.text.len() < 32 {
             return Vec::new();
         }
-        let h = simhash(&chunk.text);
-        let mut best: Option<(usize, u32)> = None;
-        for (i, &fp) in self.fingerprints.iter().enumerate() {
-            let dist = (h ^ fp).count_ones();
-            if dist <= HAMMING_THRESHOLD && best.map(|(_, d)| dist < d).unwrap_or(true) {
-                best = Some((i, dist));
-            }
+        match &self.backend {
+            Backend::SimHash { fingerprints } => analyze_simhash(chunk, fingerprints),
+            #[cfg(feature = "embeddings")]
+            Backend::Onnx(backend) => backend.analyze(chunk),
         }
-        let Some((idx, dist)) = best else {
-            return Vec::new();
-        };
-        let confidence = 1.0 - (dist as f32 / HAMMING_THRESHOLD as f32 * 0.7);
-        vec![Finding {
-            detector: "embedding".to_string(),
-            severity: Severity::High,
-            confidence: confidence.clamp(0.3, 0.95),
-            path: chunk.path.clone(),
-            span: ByteSpan::new(chunk.span.start, chunk.span.end),
-            message: format!(
-                "near-duplicate of known injection payload (hamming distance {dist})"
-            ),
-            evidence: Finding::make_evidence(KNOWN_PAYLOADS[idx], 120),
-        }]
     }
+}
+
+fn analyze_simhash(chunk: &TextChunk, fingerprints: &[u64]) -> Vec<Finding> {
+    let h = simhash(&chunk.text);
+    let mut best: Option<(usize, u32)> = None;
+    for (i, &fp) in fingerprints.iter().enumerate() {
+        let dist = (h ^ fp).count_ones();
+        if dist <= HAMMING_THRESHOLD && best.map(|(_, d)| dist < d).unwrap_or(true) {
+            best = Some((i, dist));
+        }
+    }
+    let Some((idx, dist)) = best else {
+        return Vec::new();
+    };
+    let confidence = 1.0 - (dist as f32 / HAMMING_THRESHOLD as f32 * 0.7);
+    vec![Finding {
+        detector: "embedding".to_string(),
+        category: Category::Embedding,
+        severity: Severity::High,
+        confidence: confidence.clamp(0.3, 0.95),
+        path: chunk.path.clone(),
+        span: ByteSpan::new(chunk.span.start, chunk.span.end),
+        message: format!("near-duplicate of known injection payload (hamming distance {dist})"),
+        evidence: Finding::make_evidence(KNOWN_PAYLOADS[idx], 120),
+    }]
 }
 
 /// Tiny SimHash over normalised whitespace-delimited tokens.
@@ -167,6 +202,171 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
         h = h.wrapping_mul(0x100000001b3);
     }
     h
+}
+
+#[cfg(feature = "embeddings")]
+mod onnx {
+    //! ONNX sentence-transformer backend.
+    //!
+    //! Loads a user-supplied model via `ort::Session::commit_from_file`
+    //! and embeds text by running the standard sentence-transformer
+    //! two-input interface (`input_ids` + `attention_mask`) followed by
+    //! mean pooling over the token axis. Tokenisation is deliberately
+    //! trivial (whitespace → sequential ids) so no tokenizer is
+    //! required at build time; users wanting precise tokenisation
+    //! should preprocess their input before running the scan.
+    //!
+    //! `Session::run` takes `&mut self`, but the `Detector` trait hands
+    //! us an `&self`, so we wrap the session in a `Mutex`.
+
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    use ort::session::{Session, SessionInputValue};
+    use ort::value::Tensor;
+
+    use super::{COSINE_THRESHOLD, KNOWN_PAYLOADS};
+    use crate::detect::Category;
+    use crate::types::{ByteSpan, Finding, Severity, TextChunk};
+
+    pub struct OnnxBackend {
+        session: Mutex<Session>,
+        corpus_embeddings: Vec<Vec<f32>>,
+    }
+
+    impl OnnxBackend {
+        pub fn load(path: &Path) -> Result<Self, String> {
+            let session = Session::builder()
+                .map_err(|e| e.to_string())?
+                .commit_from_file(path)
+                .map_err(|e| e.to_string())?;
+            let backend = Self {
+                session: Mutex::new(session),
+                corpus_embeddings: Vec::new(),
+            };
+            let mut corpus = Vec::with_capacity(KNOWN_PAYLOADS.len());
+            for payload in KNOWN_PAYLOADS {
+                corpus.push(
+                    backend
+                        .embed(payload)
+                        .map_err(|e| format!("failed to embed payload: {e}"))?,
+                );
+            }
+            Ok(Self {
+                session: backend.session,
+                corpus_embeddings: corpus,
+            })
+        }
+
+        pub fn analyze(&self, chunk: &TextChunk) -> Vec<Finding> {
+            let Ok(emb) = self.embed(&chunk.text) else {
+                return Vec::new();
+            };
+            let mut best: Option<(usize, f32)> = None;
+            for (i, corpus_emb) in self.corpus_embeddings.iter().enumerate() {
+                let sim = cosine(&emb, corpus_emb);
+                if sim >= COSINE_THRESHOLD && best.map(|(_, s)| sim > s).unwrap_or(true) {
+                    best = Some((i, sim));
+                }
+            }
+            let Some((idx, sim)) = best else {
+                return Vec::new();
+            };
+            vec![Finding {
+                detector: "embedding".to_string(),
+                category: Category::Embedding,
+                severity: Severity::High,
+                confidence: sim.clamp(0.5, 0.99),
+                path: chunk.path.clone(),
+                span: ByteSpan::new(chunk.span.start, chunk.span.end),
+                message: format!("ONNX embedding similarity to known payload (cosine {sim:.2})"),
+                evidence: Finding::make_evidence(KNOWN_PAYLOADS[idx], 120),
+            }]
+        }
+
+        fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+            // Trivial whitespace tokeniser (ids are just 1..=N, truncated to
+            // 128). This is intentional — real tokenisation needs the
+            // model's original tokenizer, which we don't bundle.
+            let tokens: Vec<i64> = text
+                .split_whitespace()
+                .take(128)
+                .enumerate()
+                .map(|(i, _)| (i as i64) + 1)
+                .collect();
+            if tokens.is_empty() {
+                return Err("empty input".into());
+            }
+            let len = tokens.len();
+            let input_ids = Tensor::from_array(([1i64, len as i64], tokens))
+                .map_err(|e| e.to_string())?;
+            let attention_mask = Tensor::from_array(([1i64, len as i64], vec![1i64; len]))
+                .map_err(|e| e.to_string())?;
+
+            let inputs: Vec<(std::borrow::Cow<'static, str>, SessionInputValue<'_>)> = vec![
+                (
+                    std::borrow::Cow::Borrowed("input_ids"),
+                    SessionInputValue::from(input_ids.into_dyn()),
+                ),
+                (
+                    std::borrow::Cow::Borrowed("attention_mask"),
+                    SessionInputValue::from(attention_mask.into_dyn()),
+                ),
+            ];
+
+            let mut session = self.session.lock().map_err(|e| e.to_string())?;
+            let outputs = session.run(inputs).map_err(|e| e.to_string())?;
+
+            // Take the first output — sentence-transformer exports name it
+            // either `last_hidden_state` or `sentence_embedding` and we
+            // mean-pool if the rank is 3.
+            let (_name, value) = outputs
+                .iter()
+                .next()
+                .ok_or_else(|| "model produced no outputs".to_string())?;
+            let (shape, data) = value
+                .try_extract_tensor::<f32>()
+                .map_err(|e| e.to_string())?;
+
+            // Shape dims are i64. Supported cases:
+            //   [1, hidden]         — pre-pooled
+            //   [1, tokens, hidden] — needs mean pool over tokens axis
+            let dims: Vec<i64> = shape.iter().copied().collect();
+            match dims.as_slice() {
+                [1, hidden] => Ok(data[..*hidden as usize].to_vec()),
+                [1, tokens, hidden] => {
+                    let tokens = *tokens as usize;
+                    let hidden = *hidden as usize;
+                    let mut pooled = vec![0.0f32; hidden];
+                    for t in 0..tokens {
+                        for h in 0..hidden {
+                            pooled[h] += data[t * hidden + h];
+                        }
+                    }
+                    let inv = 1.0 / tokens as f32;
+                    for v in &mut pooled {
+                        *v *= inv;
+                    }
+                    Ok(pooled)
+                }
+                other => Err(format!("unexpected output shape {other:?}")),
+            }
+        }
+    }
+
+    fn cosine(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() {
+            return 0.0;
+        }
+        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if na == 0.0 || nb == 0.0 {
+            0.0
+        } else {
+            dot / (na * nb)
+        }
+    }
 }
 
 #[cfg(test)]

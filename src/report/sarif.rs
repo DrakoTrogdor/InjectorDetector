@@ -54,6 +54,7 @@ pub fn render(report: &ScanReport) -> Result<String, serde_json::Error> {
                     }
                 }],
                 "properties": {
+                    "category": f.category.as_str(),
                     "confidence": f.confidence,
                     "severity": format!("{:?}", f.severity).to_lowercase(),
                     "evidence": f.evidence

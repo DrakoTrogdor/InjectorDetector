@@ -1,0 +1,19 @@
+- id: injector-detector
+  name: InjectorDetector
+  description: Static prompt-injection scanner for Git repositories.
+  entry: injector-detector .
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit, pre-push, manual]
+  minimum_pre_commit_version: '2.9.0'
+
+- id: injector-detector-strict
+  name: InjectorDetector (strict)
+  description: Same as injector-detector but fails on any low-severity finding.
+  entry: injector-detector . --fail-on low
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [manual]
+  minimum_pre_commit_version: '2.9.0'

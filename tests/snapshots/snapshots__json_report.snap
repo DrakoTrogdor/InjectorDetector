@@ -9,6 +9,7 @@ expression: json
       "findings": [
         {
           "detector": "heuristic",
+          "category": "heuristic",
           "severity": "critical",
           "confidence": 0.95,
           "path": "src/foo.md",
@@ -21,6 +22,7 @@ expression: json
         },
         {
           "detector": "hidden_chars",
+          "category": "hidden_chars",
           "severity": "medium",
           "confidence": 0.95,
           "path": "src/foo.md",

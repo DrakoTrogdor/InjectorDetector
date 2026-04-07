@@ -94,12 +94,21 @@ pub struct TextChunk {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub detector: String,
+    /// High-level category the detector belongs to. Populated by the
+    /// engine after the detector returns the finding so individual
+    /// detectors don't have to set it themselves.
+    #[serde(default = "default_category")]
+    pub category: crate::detect::Category,
     pub severity: Severity,
     pub confidence: f32,
     pub path: PathBuf,
     pub span: ByteSpan,
     pub message: String,
     pub evidence: String,
+}
+
+fn default_category() -> crate::detect::Category {
+    crate::detect::Category::Heuristic
 }
 
 impl Finding {

@@ -77,9 +77,17 @@ insta = { version = "1.40", features = ["json"] }
 
 [features]
 default = []
-embeddings = []
+embeddings = ["dep:ort", "dep:ndarray"]
 pdf = ["dep:pdf-extract"]
 
 [dependencies.pdf-extract]
 version = "0.7"
+optional = true
+
+[dependencies.ort]
+version = "=2.0.0-rc.10"
+optional = true
+
+[dependencies.ndarray]
+version = "0.16"
 optional = true

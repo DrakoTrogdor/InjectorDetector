@@ -62,6 +62,7 @@ impl Detector for CanaryDetector {
             let abs_end = chunk.span.start + m.end();
             out.push(Finding {
                 detector: "canary".to_string(),
+                category: Category::Canary,
                 severity: Severity::High,
                 confidence: 0.9,
                 path: chunk.path.clone(),
@@ -78,6 +79,7 @@ impl Detector for CanaryDetector {
                 let abs_end = chunk.span.start + m.end();
                 out.push(Finding {
                     detector: "canary".to_string(),
+                category: Category::Canary,
                     severity: Severity::High,
                     confidence: 0.95,
                     path: chunk.path.clone(),
