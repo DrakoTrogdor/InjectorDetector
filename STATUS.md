@@ -37,6 +37,7 @@ Update this file alongside the change that completes (or adds) an item.
 ### Extractors (`src/extract/`)
 - [x] `text` — UTF-8 / Markdown plain-text fallback
 - [x] `source` — tree-sitter dispatcher for **Rust, Python, JavaScript, TypeScript, TSX, Go, Java, C, C++, Bash, Ruby** (comments + string literals with rebased byte spans)
+- [x] **Lockfile-aware dispatch** — `Cargo.lock` → `extract_toml`; `package-lock.json` / `composer.lock` / `bun.lockb` → `extract_json`; generic `*.lock` / `*.sum` → text with `ConfigString` provenance so perplexity stays off
 - [x] `notebook` — Jupyter `.ipynb` markdown / code / output cells
 - [x] `config` — JSON, TOML, **YAML** string-value walkers
 - [x] `markup` — HTML / SVG / XML via `scraper` (text, comments, curated attributes)
@@ -56,7 +57,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **`hidden_chars`** — zero-width (Medium), bidi-override + tag-character (Critical), plus Cyrillic / Greek homoglyph clusters in Latin words (High)
 - [x] **`encoded`** — base64 / hex / URL-encoded recursive decode + needle re-scan
 - [x] **`canary`** — Rebuff-style `[CANARY:<uuid>]` regex + user-supplied tokens
-- [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`
+- [x] **`perplexity`** — character-bigram language model trained at startup from `bigram_corpus.txt` via `OnceLock`; thresholds tightened to 3.3 / 3.8 nats/symbol (above the dense-technical-prose band) and limited via `Provenance::is_natural_language` to only fire on prose-shaped chunks (plain text, Markdown, docstrings, notebook markdown cells, HTML body text, PDF text) — structured content like config values, code literals, HTML attributes, and lockfiles is skipped
 - [x] **`embedding`** — 64-bit SimHash fallback over ~30 canonical injection payloads; **real ONNX backend via `ort` 2.0.0-rc.10 behind the `embeddings` feature**, with a **real HuggingFace tokenizer via the `tokenizers` crate** and an opt-in **`bundled = true`** mode that fetches `sentence-transformers/all-MiniLM-L6-v2` (ONNX model + `tokenizer.json`) from HuggingFace into the user cache dir on first use
 - [x] **`llm_classifier`** — live detector behind the `llm` Cargo feature. Sends chunks to an OpenAI-compatible `chat/completions` endpoint and expects a `{"verdict","confidence","reason"}` JSON response. Configurable base URL, model, and API-key env var. Conservative: API or parse errors are treated as SAFE so the detector can't halt the build on transient outages. Key missing → detector no-ops with a warning.
 
@@ -91,7 +92,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **Auto-quarantine review queue** — TOML-backed `.injector-detector-ignore` file. `--quarantine` appends current findings to the ignore file and clears the report so the build passes (for human review). Normal scans filter out any finding whose `(detector, path, message, evidence_hash)` matches an entry. Path defaults to `.injector-detector-ignore` and can be overridden with `--ignore-file`.
 
 ### Tests
-- [x] **31 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`
+- [x] **33 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`
 - [x] **17 integration tests** in `tests/integration.rs` driving the public `scan()` API (adds quarantine round-trip and incremental no-op)
 - [x] **4 property tests** (`proptest`) in `tests/properties.rs` for chunker boundary safety, span correctness, multibyte input, overlap invariants
 - [x] **3 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters
@@ -102,7 +103,7 @@ Update this file alongside the change that completes (or adds) an item.
   - `notebook.ipynb`, `source.py`, `markup.html`, `workflow.yaml`
   - `high_entropy.txt`
 - [x] All feature combinations build clean: default, `--features embeddings`, `--features llm`, `--all-features`
-- [x] **Total: 55 tests passing under every feature set**
+- [x] **Total: 57 tests passing under every feature set**
 
 ## In progress
 

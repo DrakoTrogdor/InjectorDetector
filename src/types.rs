@@ -60,6 +60,25 @@ pub enum Provenance {
     Unknown,
 }
 
+impl Provenance {
+    /// Returns true if chunks of this provenance are expected to be
+    /// natural human-readable language. The perplexity detector uses
+    /// this to skip structured content (config values, code literals,
+    /// HTML attributes, notebook code cells, etc.) that would otherwise
+    /// score above the English bigram baseline for purely structural
+    /// reasons.
+    pub fn is_natural_language(self) -> bool {
+        matches!(
+            self,
+            Self::Prose
+                | Self::Docstring
+                | Self::NotebookMarkdownCell
+                | Self::HtmlText
+                | Self::PdfText
+        )
+    }
+}
+
 /// A byte span within the source file the chunk was extracted from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteSpan {
