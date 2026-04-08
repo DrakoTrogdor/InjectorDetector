@@ -28,19 +28,32 @@ and complements those runtime defenses rather than replacing them.
   `2` on scan error — drops cleanly into any CI pipeline.
 - **Layered detectors**:
   - **Heuristic** — `yara-x` 1.14 backed scanner over a bundled rule
-    pack (`rules/builtin.yar`) plus user-supplied rule files. Catches
-    "ignore previous instructions", role hijacks (`<|im_start|>`),
-    Alpaca instruction markers, jailbreak preambles, exfiltration
-    vocabulary, and tool-call spoofs.
+    pack (`rules/builtin.yar`, 14 rules) plus user-supplied rule
+    files. Catches "ignore previous instructions", role hijacks for
+    **OpenAI ChatML** (`<|im_start|>`), **Llama 2 / Mistral**
+    (`[INST]`, `<<SYS>>`), **Llama 3** (`<|start_header_id|>`,
+    `<|eot_id|>`), **GPT** (`<|endoftext|>`, FIM tokens), **Claude**
+    (`\n\nHuman:` / `\n\nAssistant:`), and **Gemini / Gemma**
+    (`<start_of_turn>` / `<end_of_turn>`); Alpaca instruction markers;
+    jailbreak preambles; exfiltration vocabulary; and tool-call
+    spoofs. The scanner runs three passes — primary, **denoise**
+    (strips zalgo / strikethrough / underline combining marks before
+    re-scanning), and **deconfuse** (rewrites Cyrillic / Greek
+    confusables to Latin before re-scanning) — so obfuscated copies
+    of the same payloads still match.
   - **Hidden characters** — five categories of invisible smuggling:
     zero-width (incl. Word Joiner U+2060), bidi-override (Trojan
     Source), Unicode tag characters, **variation selectors VS1–VS16**,
     and **Variation Selectors Supplement VS17–VS256** (the Paul Butler
     "smuggling arbitrary data through an emoji" channel). Plus
+    **stacked combining marks** (zalgo glyphs) and **strikethrough /
+    underline overlay marks** (Parseltongue-style obfuscation), and
     Cyrillic / Greek **homoglyph clusters** that are visually
     confusable with Latin letters. Math notation like `ΔVol`, `Σ(x)`,
-    `π*r²` is correctly *not* flagged. Leading UTF-8 BOMs are
-    recognised as legitimate text-encoding markers.
+    `π*r²` is correctly *not* flagged. Precomposed accented text
+    (café, résumé, Hà Nội) is *not* flagged as combining-mark
+    obfuscation. Leading UTF-8 BOMs are recognised as legitimate
+    text-encoding markers.
   - **Encoded payloads** — recursive base64 / hex / URL decoding
     (depth ≤ 2) with re-scanning of the decoded text against a
     focused needle list.
@@ -105,6 +118,30 @@ Or build a local binary without installing:
 cargo build --release
 ./target/release/injector-detector --help
 ```
+
+### Platform notes
+
+The default-feature build is pure Rust apart from a few small C
+dependencies (tree-sitter grammars, `zstd-sys` via `yara-x`) that
+compile against the system C compiler. On Linux you need a C
+toolchain (`build-essential` on Debian / Ubuntu, the `gcc` group on
+Fedora / Arch); macOS already ships one with the Xcode command-line
+tools; on Windows the MSVC build tools work out of the box.
+
+The optional **`embeddings`** feature additionally requires
+`pkg-config` and the OpenSSL development headers, because the
+`ort-sys` crate's build script downloads the ONNX Runtime native
+library via a `ureq` build that links `native-tls` → `openssl-sys`.
+On Debian / Ubuntu / WSL:
+
+```bash
+sudo apt-get install -y pkg-config libssl-dev
+```
+
+On Fedora / RHEL: `sudo dnf install -y pkgconf-pkg-config openssl-devel`.
+On Arch: `sudo pacman -S pkgconf openssl`. On macOS the Homebrew
+`pkg-config` and `openssl` formulas cover it. The `pdf` and `llm`
+features have no extra system requirements beyond a C compiler.
 
 ## Usage
 
@@ -309,6 +346,107 @@ api_key_env = "OPENAI_API_KEY"
 All fields are optional; CLI flags and config merge into a single
 `ScanConfig` at startup.
 
+## Using the optional features
+
+The three optional features (`embeddings`, `llm`, `pdf`) are opt-in
+at **build time** via `--features`, and `embeddings` and `llm` also
+need a small bit of **runtime config** in `injector-detector.toml`
+to actually turn the detector on. The default-feature build is
+fully usable on its own — every always-on detector still runs, and
+the embedding detector silently falls back to a 64-bit SimHash
+backend that needs no model file.
+
+### `embeddings` — real ONNX sentence-transformer backend
+
+Replaces the SimHash fallback with a real semantic-similarity match
+against canonical injection payloads.
+
+Build (Linux requires `pkg-config` + `libssl-dev` first — see
+[Platform notes](#platform-notes)):
+
+```bash
+cargo install --path . --features embeddings
+# or, without installing:
+cargo build --release --features embeddings
+```
+
+Runtime config — bundled mode fetches `all-MiniLM-L6-v2` from
+HuggingFace into your user cache dir on first use:
+
+```toml
+[detectors.embedding]
+enabled = true
+bundled = true
+```
+
+Or point at a model you already have on disk:
+
+```toml
+[detectors.embedding]
+enabled   = true
+model     = "/path/to/model.onnx"
+tokenizer = "/path/to/tokenizer.json"
+```
+
+If `enabled = false` (the default) or the binary was built without
+the feature, the detector silently falls back to the SimHash
+backend — no model file, no network.
+
+### `llm` — live LLM-classifier detector
+
+Sends each chunk to an OpenAI-compatible `/chat/completions`
+endpoint for a verdict.
+
+```bash
+cargo install --path . --features llm
+```
+
+Runtime config:
+
+```toml
+[detectors.llm_classifier]
+enabled     = true
+base_url    = "https://api.openai.com/v1"   # or any OpenAI-compatible endpoint
+model       = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"              # name of the env var to read
+```
+
+Run:
+
+```bash
+export OPENAI_API_KEY=sk-...
+injector-detector .
+```
+
+If the env var is missing, the detector logs a warning and no-ops
+rather than failing the build. API errors and parse failures are
+also treated as SAFE so transient outages can't break CI.
+
+### `pdf` — PDF text extraction
+
+Adds `.pdf` files to the extractor dispatch table. No runtime
+config needed — once built in, PDFs are scanned automatically by
+all the always-on detectors.
+
+```bash
+cargo install --path . --features pdf
+```
+
+### Combining features
+
+```bash
+cargo install --path . --features "embeddings llm pdf"
+# or, equivalently:
+cargo install --path . --all-features
+```
+
+You can also install directly from git with features baked in:
+
+```bash
+cargo install --git https://github.com/DrakoTrogdor/InjectorDetector \
+  --features "embeddings llm pdf" --locked injector-detector
+```
+
 ## AI agent usage
 
 If you are running this tool from inside an AI assistant (Claude Code,
@@ -353,8 +491,8 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt
 ```
 
-Test inventory: 54 unit tests, 17 integration tests, 4 property tests
-(`proptest`), 5 snapshot tests (`insta`). All 80 pass under default,
+Test inventory: 64 unit tests, 17 integration tests, 4 property tests
+(`proptest`), 5 snapshot tests (`insta`). All 90 pass under default,
 `--features embeddings`, `--features llm`, and `--all-features`.
 
 The repo layout is documented in [`DESIGN.md`](DESIGN.md) §5, and the

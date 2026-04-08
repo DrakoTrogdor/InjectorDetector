@@ -56,13 +56,15 @@ Update this file alongside the change that completes (or adds) an item.
 ### Detectors (`src/detect/`)
 - [x] `Detector` trait + parallel `Engine` (rayon, sized by `--jobs`)
 - [x] Per-detector enable toggles via config
-- [x] **`heuristic`** — `yara-x` 1.14 backed scanner loading bundled `rules/builtin.yar` (9 rules) plus user `extra_rules` glob patterns
-- [x] **`hidden_chars`** — five categories of invisible / smuggling characters:
+- [x] **`heuristic`** — `yara-x` 1.14 backed scanner loading bundled `rules/builtin.yar` (14 rules) plus user `extra_rules` glob patterns. Three-pass scan: (1) primary scan over the chunk text, (2) **denoise pass** stripping U+0300–U+036F Latin combining marks before re-scanning so zalgo / strikethrough / underline obfuscation still matches, (3) **deconfuse pass** mapping Cyrillic / Greek confusables to their Latin equivalents before re-scanning so homoglyph-substituted injection phrases match. Findings from passes 2 and 3 carry a `(denoised)` / `(deconfused)` suffix.
+- [x] **`hidden_chars`** — five categories of invisible / smuggling characters plus combining-mark obfuscation:
   - **Zero-width** (Medium): U+200B, U+200C, U+200D, **U+2060** Word Joiner, U+FEFF (with leading-BOM exception).
   - **Bidi-override** (Critical): U+202A–U+202E, U+2066–U+2069 (the Boucher & Anderson 2021 trojan-source attack).
   - **Tag-character** (Critical): U+E0000–U+E007F (a complete invisible duplicate ASCII alphabet).
   - **Variation-selector** (Critical): U+FE00–U+FE0F (VS1–VS16) — the Paul Butler "smuggling arbitrary data through an emoji" channel.
   - **Variation-selector-supplement** (Critical): U+E0100–U+E01EF (VS17–VS256) — 240-symbol invisible alphabet.
+  - **Stacked combining marks** (High): any base character with ≥ 2 stacked U+0300–U+036F combining marks (zalgo glyph obfuscation). Real precomposed Vietnamese / French / German text has at most one mark per base after NFKC, so this is a clean signal.
+  - **Combining overlay marks** (Medium): ≥ 5 strikethrough (U+0336) or underline (U+0332) combining marks per chunk — Parseltongue's overlay-style transforms apply one mark per letter rather than stacking.
 
   Plus Latin words containing Cyrillic or Greek characters that are **visually confusable** with a specific Latin letter (High). Math/science notation like `ΔVol`, `Σ(x)`, `π*r²`, `λ-calc` is deliberately not flagged. A **leading UTF-8 BOM (U+FEFF at byte 0)** is also not flagged — it's a standard text-encoding marker written by many Windows tools (MSBuild `.g.props` / `.g.targets`, Visual Studio auto-generated files). BOMs mid-file are still flagged.
 - [x] **`encoded`** — base64 / hex / URL-encoded recursive decode + needle re-scan
@@ -75,7 +77,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **`llm_classifier`** — live detector behind the `llm` Cargo feature. Sends chunks to an OpenAI-compatible `chat/completions` endpoint and expects a `{"verdict","confidence","reason"}` JSON response. Configurable base URL, model, and API-key env var. Conservative: API or parse errors are treated as SAFE so the detector can't halt the build on transient outages. Key missing → detector no-ops with a warning.
 
 ### Bundled assets
-- [x] `rules/builtin.yar` — 9 YARA rules with severity / confidence / message metadata
+- [x] `rules/builtin.yar` — 14 YARA rules with severity / confidence / message metadata, covering classic injection idioms, OpenAI ChatML role tokens, **Llama 2 / Mistral `[INST]` / `<<SYS>>`**, **Llama 3 `<|start_header_id|>` / `<|eot_id|>`**, **GPT `<|endoftext|>` and FIM tokens**, **Claude `\n\nHuman:` / `\n\nAssistant:` markers**, **Gemini / Gemma `<start_of_turn>` / `<end_of_turn>`**, Alpaca instruction markers, jailbreak preambles, exfiltration vocabulary, and tool-call spoofs
 - [x] `src/detect/bigram_corpus.txt` — embedded English training corpus
 
 ### Aggregator (`src/aggregate.rs`)
@@ -106,7 +108,7 @@ Update this file alongside the change that completes (or adds) an item.
 - [x] **Auto-quarantine review queue** — TOML-backed `.injector-detector-ignore` file. `--quarantine` appends current findings to the ignore file and clears the report so the build passes (for human review). Normal scans filter out any finding whose `(detector, path, message, evidence_hash)` matches an entry. Path defaults to `.injector-detector-ignore` and can be overridden with `--ignore-file`.
 
 ### Tests
-- [x] **54 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `safe_view`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`, `progress`
+- [x] **64 unit tests** across `types`, `chunk`, `aggregate`, `quarantine`, `safe_view`, `bigram_model`, `heuristic`, `hidden_chars`, `encoded`, `canary`, `perplexity`, `embedding`, `progress`
 - [x] **17 integration tests** in `tests/integration.rs` driving the public `scan()` API (adds quarantine round-trip and incremental no-op)
 - [x] **4 property tests** (`proptest`) in `tests/properties.rs` for chunker boundary safety, span correctness, multibyte input, overlap invariants
 - [x] **5 snapshot tests** (`insta`) in `tests/snapshots.rs` for the human, JSON, and SARIF reporters plus AI-safe variants
@@ -117,7 +119,7 @@ Update this file alongside the change that completes (or adds) an item.
   - `notebook.ipynb`, `source.py`, `markup.html`, `workflow.yaml`
   - `high_entropy.txt`
 - [x] All feature combinations build clean: default, `--features embeddings`, `--features llm`, `--all-features`
-- [x] **Total: 80 tests passing under every feature set**
+- [x] **Total: 90 tests passing under every feature set**
 
 ## In progress
 
