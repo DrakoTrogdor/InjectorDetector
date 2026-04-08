@@ -151,8 +151,10 @@ fn yaml_extractor_surfaces_run_step() {
 fn fail_on_threshold_controls_verdict() {
     // With fail_on = Critical, even clean files should remain SAFE; the
     // dirty fixture still has Critical findings (ChatML hijack tokens).
-    let mut cfg = ScanConfig::default();
-    cfg.fail_on = Severity::Critical;
+    let cfg = ScanConfig {
+        fail_on: Severity::Critical,
+        ..ScanConfig::default()
+    };
     let report = scan(&fixture("dirty"), &cfg).unwrap();
     assert_eq!(report.verdict, Verdict::NotSafe);
 }
@@ -167,8 +169,10 @@ fn quarantine_mode_suppresses_matching_findings() {
     .unwrap();
 
     // First pass: normal scan → NOT SAFE.
-    let mut cfg = ScanConfig::default();
-    cfg.ignore_file = dir.path().join(".injector-detector-ignore");
+    let cfg = ScanConfig {
+        ignore_file: dir.path().join(".injector-detector-ignore"),
+        ..ScanConfig::default()
+    };
     let report = scan(dir.path().to_str().unwrap(), &cfg).unwrap();
     assert_eq!(report.verdict, Verdict::NotSafe);
 

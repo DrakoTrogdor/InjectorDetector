@@ -110,8 +110,7 @@ pub fn sanitize_path(path: &str) -> String {
 
 fn escape_and_truncate(text: &str, max_len: usize) -> String {
     let mut out = String::with_capacity(text.len() + 16);
-    let mut count = 0usize;
-    for c in text.chars() {
+    for (count, c) in text.chars().enumerate() {
         if count >= max_len {
             out.push('…');
             break;
@@ -133,7 +132,6 @@ fn escape_and_truncate(text: &str, max_len: usize) -> String {
             }
             c => out.push(c),
         }
-        count += 1;
     }
     out
 }

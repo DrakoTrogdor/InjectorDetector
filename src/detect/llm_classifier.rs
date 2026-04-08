@@ -145,7 +145,13 @@ impl Detector for LlmClassifierDetector {
             return Vec::new();
         }
         let text = if chunk.text.len() > MAX_CHUNK_BYTES {
-            &chunk.text[..MAX_CHUNK_BYTES]
+            // Walk back to the nearest char boundary so we never panic on
+            // multi-byte UTF-8 input that straddles MAX_CHUNK_BYTES.
+            let mut cutoff = MAX_CHUNK_BYTES;
+            while cutoff > 0 && !chunk.text.is_char_boundary(cutoff) {
+                cutoff -= 1;
+            }
+            &chunk.text[..cutoff]
         } else {
             chunk.text.as_str()
         };

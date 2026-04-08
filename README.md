@@ -344,7 +344,10 @@ api_key_env = "OPENAI_API_KEY"
 ```
 
 All fields are optional; CLI flags and config merge into a single
-`ScanConfig` at startup.
+`ScanConfig` at startup. Precedence is **CLI flag > config file > built-in
+default**, so passing `--fail-on high` on the command line always wins
+over a `fail_on = "low"` entry in the config. `--include` / `--exclude`
+are additive: globs from the CLI are appended to those from the config.
 
 ## Using the optional features
 

@@ -191,17 +191,17 @@ fn simhash(text: &str) -> u64 {
     let mut bits = [0i32; 64];
     for token in normalised.split_whitespace() {
         let h = fnv1a64(token.as_bytes());
-        for i in 0..64 {
+        for (i, b) in bits.iter_mut().enumerate() {
             if (h >> i) & 1 == 1 {
-                bits[i] += 1;
+                *b += 1;
             } else {
-                bits[i] -= 1;
+                *b -= 1;
             }
         }
     }
     let mut out = 0u64;
-    for i in 0..64 {
-        if bits[i] > 0 {
+    for (i, &b) in bits.iter().enumerate() {
+        if b > 0 {
             out |= 1 << i;
         }
     }

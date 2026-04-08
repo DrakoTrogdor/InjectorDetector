@@ -20,6 +20,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 /// Thread-safe progress reporter. Cloneable so multiple workers can
 /// increment the same bar concurrently via `Arc` internally.
+#[derive(Default)]
 pub struct ProgressReporter {
     quiet: bool,
     inner: Option<Inner>,
@@ -110,7 +111,13 @@ impl ProgressReporter {
             let _lock = inner.suffix.lock();
             let display = path.display().to_string();
             let truncated = if display.len() > 60 {
-                format!("…{}", &display[display.len() - 59..])
+                // Walk forward to the nearest char boundary so we never
+                // panic on a path containing multi-byte UTF-8 characters.
+                let mut start = display.len() - 59;
+                while start < display.len() && !display.is_char_boundary(start) {
+                    start += 1;
+                }
+                format!("…{}", &display[start..])
             } else {
                 display
             };
@@ -175,7 +182,7 @@ fn display_name(source: &str) -> String {
     }
     let trimmed = source.trim_end_matches('/').trim_end_matches('\\');
     let last = trimmed
-        .rsplit(|c| c == '/' || c == '\\' || c == ':')
+        .rsplit(['/', '\\', ':'])
         .find(|s| !s.is_empty())
         .unwrap_or(trimmed);
     let last = last.trim_end_matches(".git");
@@ -233,11 +240,3 @@ mod tests {
     }
 }
 
-impl Default for ProgressReporter {
-    fn default() -> Self {
-        Self {
-            quiet: false,
-            inner: None,
-        }
-    }
-}

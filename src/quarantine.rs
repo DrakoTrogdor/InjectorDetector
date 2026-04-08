@@ -164,7 +164,7 @@ fn now_rfc3339() -> String {
     let h = seconds_of_day / 3600;
     let mi = (seconds_of_day % 3600) / 60;
     let s = seconds_of_day % 60;
-    format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}-{s:02}Z")
+    format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
 fn date_from_days(mut days: i64) -> (i32, u32, u32) {

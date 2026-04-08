@@ -30,6 +30,10 @@ desktop.ini
 /reports/
 *.sarif.tmp
 /.injector-detector-cache/
+/.smoke-parseltongue/
+
+# Local dev-loop scratch
+/DEV-LOOP-CHECKLIST.md
 
 # Local config overrides
 /config.local.toml

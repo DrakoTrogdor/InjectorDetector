@@ -28,8 +28,8 @@ pub fn render(
     }
 
     let rules: Vec<Value> = rule_index
-        .iter()
-        .map(|(id, _)| {
+        .keys()
+        .map(|id| {
             json!({
                 "id": id,
                 "name": id,

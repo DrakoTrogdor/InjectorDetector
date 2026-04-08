@@ -5,9 +5,9 @@
 //! are small enough that span-level precision is rarely needed and a
 //! whole-string chunk is good enough for the heuristic detectors.
 //!
-//! YAML support is intentionally omitted for now to avoid pulling in
-//! `serde_yaml`; the JSON walker handles `.json` and the TOML walker
-//! handles `.toml`. YAML can be added behind a feature flag later.
+//! Handles `.json` (`extract_json`), `.toml` (`extract_toml`), and `.yaml` /
+//! `.yml` (`extract_yaml`) by walking the parsed structure and emitting a
+//! chunk per string value.
 
 use std::path::Path;
 
