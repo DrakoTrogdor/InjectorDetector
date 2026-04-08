@@ -25,6 +25,22 @@ impl Severity {
             Severity::Critical => 15.0,
         }
     }
+
+    /// Lowercase label, matching the serde / SARIF / JSON representation.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Low => "low",
+            Severity::Medium => "medium",
+            Severity::High => "high",
+            Severity::Critical => "critical",
+        }
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl std::str::FromStr for Severity {

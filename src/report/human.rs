@@ -24,7 +24,7 @@ pub fn render(report: &ScanReport, options: &RenderOptions) -> String {
     );
 
     if let Some(sev) = report.max_severity {
-        let _ = writeln!(out, "max severity: {sev:?}");
+        let _ = writeln!(out, "max severity: {sev}");
     }
 
     for file in &report.files {
@@ -34,10 +34,14 @@ pub fn render(report: &ScanReport, options: &RenderOptions) -> String {
             file.path.display().to_string()
         };
         let _ = writeln!(out, "\n{path}");
+        let max = file
+            .max_severity
+            .map(|s| s.as_str())
+            .unwrap_or("none");
         let _ = writeln!(
             out,
-            "  score {:.2}, max {:?}",
-            file.score, file.max_severity
+            "  score {:.2}, max severity {max}",
+            file.score
         );
         for f in &file.findings {
             let message = if options.ai_safe {
@@ -47,7 +51,7 @@ pub fn render(report: &ScanReport, options: &RenderOptions) -> String {
             };
             let _ = writeln!(
                 out,
-                "  [{:?}] {} @ {}..{}: {}",
+                "  [{}] {} @ {}..{}: {}",
                 f.severity, f.detector, f.span.start, f.span.end, message
             );
             let evidence = if options.ai_safe {

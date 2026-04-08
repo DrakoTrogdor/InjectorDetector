@@ -3,11 +3,11 @@ source: tests/snapshots.rs
 expression: fixture_report().render_human()
 ---
 InjectorDetector — verdict: NOT SAFE (2 finding(s) across 1 file(s))
-max severity: Critical
+max severity: critical
 
 src/foo.md
-  score 17.50, max Some(Critical)
-  [Critical] heuristic @ 10..22: ChatML role-hijack token (chatml_role_hijack)
+  score 17.50, max severity critical
+  [critical] heuristic @ 10..22: ChatML role-hijack token (chatml_role_hijack)
     evidence: <|im_start|>
-  [Medium] hidden_chars @ 40..43: hidden zero-width U+200B
+  [medium] hidden_chars @ 40..43: hidden zero-width U+200B
     evidence: U+200B
